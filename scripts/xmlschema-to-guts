@@ -1,0 +1,667 @@
+#!/usr/bin/env python
+
+import sys, re, os, textwrap
+import guts
+from guts import *
+
+def upper_first(x):
+    if len(x) > 1:
+        return x[0].upper() + x[1:]
+    else:
+        return x.upper()
+
+def make_valid_classname(patches, name):
+    name = upper_first(guts.us_to_cc(name))
+    return name
+
+def make_default(typ, value):
+    # can fail for derived types, check 'default=...' in output
+    if typ in 'Int Float'.split():
+        return '%s' % value
+    else:
+        return "'%s'" % value
+    
+
+def sort_patches(patches):
+    queue, waiting = [], []
+    for patch in patches:
+        if not patch.depends:
+            queue.append(patch)
+        else:
+            waiting.append(patch)
+
+    patches = waiting
+
+    have = []
+    while queue:
+        x = queue.pop(0)
+        yield x
+        waiting = []
+        for patch in patches:
+            while True:
+                try:
+                    patch.depends.remove(x.name)
+                except ValueError:
+                    break
+
+            if not patch.depends:
+                queue.append(patch)
+            else:
+                waiting.append(patch)
+
+        patches = waiting
+    
+    if patches:
+        raise Exception('unsatisfied dependencies for %s' % ', '.join('%s (%s)' % (p.name, ', '.join(p.depends))  for p in patches))
+
+class PropertyTypeDef:
+    def __init__(self, type, args, kwargs):
+        self.type = type
+        self.args = args
+        self.kwargs = kwargs
+
+    def __str__(self):
+        argstr = ', '.join(
+                [ str(arg) for arg in self.args ] + 
+                [ '%s=%s' % (k, self.kwargs[k]) for k in sorted(self.kwargs.keys()) ])
+        return '%s.T(%s)' % (self.type, argstr)
+
+class PropertyDef:
+    def __init__(self, name, property_type):
+        self.name = name
+        self.property_type = property_type
+
+    def __str__(self):
+        return '    %s = %s' % (self.name, self.property_type)
+
+class ClassDef:
+    def __init__(self, name, bases=(), properties=(), xmltagname=None, doc=None):
+        self.name = name
+        self.bases = bases
+        self.properties = properties
+        self.xmltagname = xmltagname
+        self.doc = doc
+
+    def __str__(self):
+        props = list(self.properties)
+
+        if self.doc:
+            doc = re.sub(r'\s+', ' ', self.doc)
+            doc = '\n'.join(textwrap.wrap(doc, initial_indent=' '*7, subsequent_indent=' '*4, width=70)).lstrip()
+            props[0:0] = [ "    '''%s'''" % doc, '' ]
+
+        if self.xmltagname:
+            props[0:0] = [ "    xmltagname = '%s'" % self.xmltagname ]
+
+        if not props:
+            propstr = '    pass'
+        else:
+            propstr = '\n'.join( str(prop) for prop in props )
+
+        return 'class %s(%s):\n' % (self.name, ', '.join(self.bases)) + propstr
+
+class CodePatch:
+    def __init__(self, name, code, depends=None):
+        self.name = name
+        self.code = code
+        if depends is None:
+            self.depends = []
+        else:
+            self.depends = depends
+
+    def __str__(self):
+        return str(self.code)
+
+xsd_namespace = 'http://www.w3.org/2001/XMLSchema'
+
+def xsd_typ(ident):
+    return xsd_namespace, ident
+
+class IntOrUnbounded(Object):
+    dummy_for = int
+
+    class __T(TBase):
+        def validate(self, val, regularize, depth):
+            if self.optional and val is None:
+                return val
+
+            if regularize:
+                if val == 'unbounded':
+                    val = -1
+                else:
+                    val = int(val)
+
+            if not isinstance(val, int):
+                raise ValidationError('bla bla bla')
+
+            return val
+
+        def to_save(self, val):
+            if val == -1:
+                return 'unbounded'
+            else:
+                return val
+
+class SchemaType(String):
+    pass
+
+class Base(Object):
+
+    def __init__(self, **kwargs):
+        Object.__init__(self, **kwargs)
+
+    def resolve_ns(self, v):
+        if ':' in v:
+            nsshort, v = v.split(':', 1)
+            return self.namespace_map[nsshort], v
+        else:
+            return '', v
+    
+class Annotation(Base):
+    documentation = String.T()
+
+class Pattern(Base):
+    value = String.T()
+
+class Enumeration(Base):
+    value = String.T()
+    annotation = Annotation.T(optional=True)
+
+class IntValue(Base):
+    value = Int.T()
+
+class Attribute(Base):
+    name = String.T()
+    type = String.T(optional=True)
+    use = String.T(optional=True)
+    fixed = String.T(optional=True)
+    simple_type = Defer('SimpleType.T', optional=True)
+    default = String.T(optional=True)
+    annotation = Annotation.T(optional=True)
+
+    def make_property_definition(self, patches):
+        
+        if self.simple_type:
+            typ = make_valid_classname(patches, 'Anonymous'+upper_first(self.name))
+            self.simple_type.make_code_patches(patches, typ)
+        else:
+            typ = translate_type(self.resolve_ns(self.type))
+
+        name = guts.make_name_from_xmltagname(self.name)
+        kwargs = dict(xmlstyle="'attribute'")
+        if self.use != 'required':
+            kwargs['optional'] = True
+
+        if self.default is not None:
+            kwargs['default'] = make_default(typ, self.default)
+
+        if self.fixed is not None:
+            kwargs['default'] = make_default(typ, self.fixed)
+
+        if guts.make_xmltagname_from_name(name) != self.name:
+            kwargs['xmltagname'] = "'%s'" % self.name
+
+        pdef = PropertyDef( name, PropertyTypeDef(typ, (), kwargs) )
+
+        return pdef, [ typ ]
+
+class AttributeGroup(Base):
+    name = String.T(optional=True)
+    ref = String.T(optional=True)
+    attribute_list = List.T(Attribute.T())
+    annotation = Annotation.T(optional=True)
+
+    def dereference(self, ag):
+        self.name = ag.name
+        self.ref = None
+        self.attribute_list = ag.attribute_list
+        self.annotation = ag.annotation
+
+    def make_property_definitions(self, patches):
+        for attribute in self.attribute_list:
+            yield attribute.make_property_definition(patches)
+
+class Restriction(Base):
+    base = SchemaType.T()
+    pattern = Pattern.T(optional=True)
+    enumeration_list = List.T(Enumeration.T())
+    attribute_list = List.T(Attribute.T(optional=True))
+    attribute_group = AttributeGroup.T(optional=True)
+    max_length = IntValue.T(optional=True)
+    min_exclusive = String.T(optional=True)
+    max_exclusive = String.T(optional=True)
+    min_inclusive = String.T(optional=True)
+    max_inclusive = String.T(optional=True)
+
+    def make_property_definitions(self, patches):
+        for attribute in self.attribute_list:
+            yield attribute.make_property_definition(patches)
+
+        if self.attribute_group:
+            for x in self.attribute_group.make_property_definitions(patches):
+                yield x
+            
+
+class Element(Base):
+    name = String.T(optional=True)
+    ref = String.T(optional=True)
+    type = String.T(optional=True)
+    min_occurs = Int.T(optional=True)
+    max_occurs = IntOrUnbounded.T(optional=True)
+    complex_type = Defer('ComplexType.T', optional=True)
+    simple_type = Defer('SimpleType.T', optional=True)
+    default = String.T(optional=True)
+    annotation = Annotation.T(optional=True)
+
+    def make_property_definition(self, patches, min_occurs=1, max_occurs=1):
+
+        tagname = self.name
+
+        if self.complex_type:
+            typ = make_valid_classname(patches, tagname)
+            self.complex_type.make_code_patches(patches, typ)
+        elif self.simple_type:
+            typ = make_valid_classname(patches, tagname)
+            self.simple_type.make_code_patches(patches, typ)
+        elif self.ref:
+            tagname = self.ref
+            typ = self.ref
+        else:
+            typ = translate_type(self.resolve_ns(self.type))
+            
+        typ = make_valid_classname([], typ)
+
+        name = guts.make_name_from_xmltagname(tagname)
+        onename = name
+        if self.min_occurs is not None:
+            min_occurs = self.min_occurs
+        if self.max_occurs is not None:
+            max_occurs = self.max_occurs
+
+        generate_list = max_occurs == -1
+
+        kwargs = {}
+
+        if generate_list:
+            name = name + '_list'
+            content_name = guts.make_content_name(name)
+            if guts.make_xmltagname_from_name(content_name) != tagname:
+                kwargs['xmltagname'] = "'%s'" % tagname
+        else:
+            if guts.make_xmltagname_from_name(name) != tagname:
+                kwargs['xmltagname'] = "'%s'" % tagname
+
+        if min_occurs == 0 and max_occurs == 1:
+            kwargs['optional'] = 'True'
+
+        if self.default is not None:
+            kwargs['default'] = make_default(typ, self.default)
+
+        ptype = PropertyTypeDef(typ, (), kwargs)
+        if generate_list:
+            ptype = PropertyTypeDef('List', [ ptype ], {})
+
+        return PropertyDef(name, ptype), [ typ ]
+    
+    def make_code_patches(self, patches, classname=None, add_xmltagnames=False):
+        xmltagname = None
+        if add_xmltagnames:
+            xmltagname = self.name
+
+        code_patches = []
+        if self.complex_type:
+            typ = make_valid_classname(patches, self.name)
+            self.complex_type.make_code_patches(patches, classname=typ, xmltagname=xmltagname)
+        elif self.simple_type:
+            typ = make_valid_classname(patches, self.name)
+            self.simple_type.make_code_patches(patches, classname=typ)
+        elif self.type:
+            typ = translate_type(self.resolve_ns(self.type))
+            name = make_valid_classname(patches, self.name)
+            assert name not in ( p.name for p in patches )
+            secondline = 'pass'
+            if add_xmltagnames:
+                secondline = "xmltagname = '%s'" % self.name
+            cp = CodePatch( name, 
+                    'class %s(%s):\n    %s\n' % (name, typ, secondline), 
+                    depends=[typ] )
+
+            patches.append(cp)
+
+
+class Any(Base):
+    namespace = String.T()
+    process_contents = String.T()
+    min_occurs = Int.T(default=1)
+    max_occurs = IntOrUnbounded.T(default=1)
+
+
+class All(Base):
+    min_occurs = Int.T(default=1)
+    max_occurs = IntOrUnbounded.T(default=1)
+    element_list = List.T(Element.T())
+
+    def make_property_definitions(self, patches):
+        for element in self.element_list:
+            yield element.make_property_definition(patches, 
+                min_occurs=self.min_occurs,
+                max_occurs=self.max_occurs)
+
+class Sequence(Base):
+    min_occurs = Int.T(default=1)
+    max_occurs = IntOrUnbounded.T(default=1)
+    element_list = List.T(Element.T())
+    group_list = List.T(Defer('Group.T'))
+    choice_list = List.T(Defer('Choice.T'))
+    sequence_list = List.T(Defer('Sequence.T'))
+    any_list = List.T(Any.T())
+
+    def make_property_definitions(self, patches):
+        for element in self.element_list:
+            yield element.make_property_definition(patches, 
+                min_occurs=self.min_occurs,
+                max_occurs=self.max_occurs)
+
+        for choice in self.choice_list:
+            for x in choice.make_property_definitions(patches):
+                yield x
+            
+
+
+class Choice(Base):
+    min_occurs = Int.T(optional=True, default=1)
+    max_occurs = IntOrUnbounded.T(optional=True, default=1)
+    element_list = List.T(Element.T())
+    group_list = List.T(Defer('Group.T'))
+    choice_list = List.T(Defer('Choice.T'))
+    sequence_list = List.T(Sequence.T())
+    any_list = List.T(Any.T())
+    annotation = Annotation.T(optional=True)
+
+    def make_property_definitions(self, patches):
+        for element in self.element_list:
+            yield element.make_property_definition(patches, min_occurs=self.min_occurs, max_occurs=self.max_occurs)
+
+
+class Group(Base):
+    name = String.T(optional=True)
+    ref = String.T(optional=True)
+    all = All.T(optional=True)
+    choice = Choice.T(optional=True)
+    sequence = Sequence.T(optional=True)
+    min_occurs = Int.T(default=1)
+    max_occurs = IntOrUnbounded.T(default=1)
+    annotation = Annotation.T(optional=True)
+
+    def make_property_definitions(self, patches):
+        for x in choice.make_property_definitions(patches):
+            yield x
+        for x in sequence.make_property_definitions(patches):
+            yield x
+        for x in all.make_property_definitions(patches):
+            yield x
+
+
+class XList(Base):
+    item_type = String.T()
+
+class Union(Base):
+    member_types = String.T()
+
+class SimpleType(Base):
+    name = String.T(optional=True)
+    restriction = Restriction.T(optional=True)
+    list = XList.T(optional=True)
+    union = Union.T(optional=True)
+    annotation = Annotation.T(optional=True)
+
+    def make_code_patches(self, patches, classname=None):
+        r = self.restriction
+
+        if not classname:
+            classname = self.name
+
+        classname = make_valid_classname(patches, classname)
+        assert classname not in ( p.name for p in patches )
+
+        depends = []
+
+        if r and r.resolve_ns(r.base) in (xsd_typ('string'), xsd_typ('NMTOKEN')) and r.enumeration_list:
+            enum = [ x.value for x in r.enumeration_list ]
+            classdef = 'class %s(StringChoice):\n    choices = [\n        %s ]' % \
+                (classname, ',\n        '.join([ "'%s'" % e for e in enum]))
+
+        elif r and r.pattern:
+            classdef = 'class %s(StringPattern):\n    pattern = %s' % (classname, repr(r.pattern.value))
+
+        elif r and r.base and r.pattern is None and not r.enumeration_list:
+            basename = translate_type(r.resolve_ns(r.base))
+            basename = make_valid_classname([], basename)
+            classdef = 'class %s(%s):\n    pass' % (classname,basename)
+            depends.append(basename)
+
+        elif self.list:
+            itemt = translate_type(self.list.resolve_ns(self.list.item_type))
+            itemt = make_valid_classname([], itemt)
+            classdef = '%s = make_typed_list_class(%s)' % (classname, itemt)
+
+        elif self.union:
+            member_types = [ make_valid_classname([], translate_type(self.union.resolve_ns(t)))
+                for t in self.union.member_types.split() ]
+            classdef = 'class %s(Union):\n    members = [ %s ]' % (classname, ', '.join(member_types))
+            depends.extend(member_types)
+
+
+        else:
+            print self
+            raise Exception( 'Cannot create class for SimpleType %s' % classname )
+        
+        patches.append( CodePatch(classname, classdef, depends=depends) )
+
+class Extension(Base):
+    base = String.T()
+    sequence = Sequence.T(optional=True)
+    attribute_list = List.T( Attribute.T(optional=True) )
+    attribute_group = AttributeGroup.T(optional=True)
+
+    def make_property_definitions(self, patches):
+        if self.sequence:
+            for propdef in self.sequence.make_property_definitions(patches):
+                yield propdef
+
+        for attribute in self.attribute_list:
+            yield attribute.make_property_definition(patches)
+
+class SimpleContent(Base):
+    extension = Extension.T(optional=True)
+    restriction = Restriction.T(optional=True)
+
+class ComplexContent(Base):
+    extension = Extension.T()
+
+class ComplexType(Base):
+    name = String.T(optional=True)
+    choice = Choice.T(optional=True)
+    sequence = Sequence.T(optional=True)
+    all = All.T(optional=True)
+    attribute_list = List.T( Attribute.T(optional=True) )
+    simple_content = SimpleContent.T(optional=True)
+    complex_content = ComplexContent.T(optional=True)
+    annotation = Annotation.T(optional=True)
+
+    def make_code_patches(self, patches, classname=None, xmltagname=None):
+
+        propdefs = []
+        for a in self.attribute_list:
+            propdefs.append( a.make_property_definition(patches) )
+
+        if self.all:
+            for propdef in self.all.make_property_definitions(patches):
+                propdefs.append(propdef)
+
+        if self.sequence:
+            for propdef in self.sequence.make_property_definitions(patches):
+                propdefs.append(propdef)
+
+        if self.choice:
+            for propdef in self.choice.make_property_definitions(patches):
+                propdefs.append(propdef)
+
+        basename = 'Object'
+        for content in (self.complex_content, self.simple_content):
+            if content:
+                ext = content.extension
+                if not ext:
+                    ext = content.restriction
+
+                if ext:
+                    basename = translate_type(ext.resolve_ns(ext.base))
+                    for propdef in ext.make_property_definitions(patches):
+                        propdefs.append(propdef)
+                    
+                    if basename in guts_types:
+                        typ = basename
+                        basename = 'Object'
+                        kwargs = dict(xmlstyle="'content'")
+                        pdef = PropertyDef( 'value', PropertyTypeDef(typ, (), kwargs) )
+                        propdefs.append( (pdef, [ typ ]) )
+
+        basename = make_valid_classname([], basename)
+    
+        if not classname:
+            classname = self.name
+
+        classname = make_valid_classname(patches, classname)
+        assert classname not in ( p.name for p in patches )
+
+        depends = []
+        properties = []
+        depends.append(basename)
+
+        for propdef in propdefs:
+            pdef, deps = propdef[:2]
+            properties.append(pdef)
+            depends.extend(deps)
+
+        doc = None
+        if self.annotation:
+            doc = self.annotation.documentation.strip()
+
+        cdef = ClassDef(classname, (basename,), properties, xmltagname=xmltagname, doc=doc)
+        patches.append(CodePatch(classname, cdef, depends=depends))
+
+class Import(Base):
+    namespace = String.T()
+    schema_location = String.T()
+
+    def make_code_patches(self, patches, base_dir=None):
+        if base_dir is not None:
+            fn = os.path.join(base_dir, self.schema_location)
+        else:
+            fn = self.schema_location
+
+        with open(fn) as f:
+            s =  list(load_xml(f, add_namespace_maps=True))[0]
+            return s.make_code_patches(patches)
+
+
+
+
+class schema(Base):
+    xmltagname = 'schema'
+
+    target_namespace = String.T(optional=True)
+    element_form_default = String.T(optional=True)
+    attribute_form_default = String.T(optional=True)
+
+    simple_type_list = List.T(SimpleType.T())
+    complex_type_list = List.T(ComplexType.T())
+    element_list = List.T(Element.T())
+    group_list = List.T(Group.T())
+    attribute_group_list = List.T(AttributeGroup.T(optional=True))
+
+    import_list = List.T(Import.T())
+    
+    annotation = Annotation.T(optional=True)
+
+    def dereference(self):
+        ags = {}
+        for path, ag in walk(self, AttributeGroup):
+            if not ag.ref:
+                typ = translate_type(ag.resolve_ns(ag.name))
+                ags[typ] = ag
+
+        for path, ag in walk(self, AttributeGroup):
+            if ag.ref:
+                typ = translate_type(ag.resolve_ns(ag.ref))
+                ag.dereference(ags[typ])
+
+    def make_code_patches(self, patches, base_dir_for_imports=None):
+        for imp in self.import_list:
+            imp.make_code_patches(patches, base_dir=base_dir_for_imports)
+
+        for st in self.simple_type_list:
+            st.make_code_patches(patches)
+
+        for ct in self.complex_type_list:
+            ct.make_code_patches(patches)
+
+        for el in self.element_list:
+            el.make_code_patches(patches, add_xmltagnames=True)
+
+
+    def gen_code(self, base_dir_for_imports=None):
+        self.dereference()
+        patches = []
+
+        for builtin in guts_types:
+            patches.append( CodePatch(builtin, '') )
+
+        self.make_code_patches(patches, base_dir_for_imports=base_dir_for_imports)
+
+        return '\n\n\n'.join( str(patch) for patch in sort_patches(patches) if str(patch))
+
+
+
+def translate_type(ns_typ):
+
+    ns, typ = ns_typ
+        
+    if ns == xsd_namespace:
+        typ = {
+            'boolean': 'Bool',
+            'double': 'Float',
+            'integer': 'Int',
+            'int': 'Int',
+            'float': 'Float',
+            'string': 'String',
+            'dateTime': 'Timestamp',
+            'date': 'DateTimestamp',
+            'NMTOKEN': 'String',
+            'decimal': 'Float',
+            'positiveInteger': 'Int',
+            'anyURI': 'String',
+        }[typ]
+
+        return typ
+
+    elif ns == '':
+        return typ
+
+    else:
+        return typ
+        raise Exception('Cannot handle namespace %s' % ns)
+
+
+if len(sys.argv) != 2:
+    sys.exit('usage: xmlschema-to-guts input.xsd')
+
+fn = sys.argv[1]
+
+s =  list(load_xml(open(fn, 'r'), add_namespace_maps=True))[0]
+
+print 'from guts import *'
+print
+print s.gen_code(base_dir_for_imports=os.path.dirname(fn))
+
+
