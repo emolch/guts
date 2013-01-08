@@ -44,7 +44,7 @@ artist: Kraftwerk
 
 They also serialize to XML:
 
-```python
+```pycon
 >>> print playlist.dump_xml()
 <Song>
   <name>Metropolis</name>
@@ -54,7 +54,7 @@ They also serialize to XML:
 
 Objects can validate themselves:
 
-```python
+```pycon
 >>> song1.validate()
 >>> song2.year = 1977
 >>> song2.validate()
