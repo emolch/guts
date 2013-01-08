@@ -26,7 +26,7 @@ class Playlist(Object):
 
 These classes come with automatic __init__:
 
-```python
+```pycon
 >>> from playlist import *
 >>> song1 = Song(name='Metropolis', artist='Kraftwerk')
 >>> song2 = Song(name='I Robot', artist='The Alan Parsons Project', album='I Robot')
@@ -35,7 +35,7 @@ These classes come with automatic __init__:
 
 They serialize to YAML:
 
-```python
+```pycon
 >>> print song1.dump()
 --- !playlist.Song
 name: Metropolis
@@ -67,7 +67,7 @@ guts.ValidationError: year: "abc" is not of type int
 
 Objects can regularize themselves:
 
-```python
+```pycon
 >>> song2.year = '1977'
 >>> song2.validate(regularize=True)
 >>> song2.year
