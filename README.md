@@ -4,10 +4,17 @@ Guts
  
 Lightweight declarative YAML and XML data binding for Python
 
+Prerequisites
+-------------
+
+  * PyYAML: Download it from http://pyyaml.org/wiki/PyYAML and follow the given
+    installation instructions or install it through your system's package
+    manager (e.g. the `python-yaml` package on Debian based Linuxes).
+
 Usage
 -----
 
-`playlist.py`:
+A file `playlist.py` might look like:
 
 ```python
 from guts import *
