@@ -270,14 +270,12 @@ And we can use it e.g. to parse the example XML file `po.xml` from above:
 --- !po.PurchaseOrder
 order_date: '1999-10-20'
 ship_to: !po.USAddress
-  country: US
   name: Alice Smith
   street: 123 Maple Street
   city: Mill Valley
   state: CA
   zip: 90952.0
 bill_to: !po.USAddress
-  country: US
   name: Robert Smith
   street: 8 Oak Avenue
   city: Old Town
