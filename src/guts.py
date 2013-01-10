@@ -920,14 +920,15 @@ def dump_xml(obj, stream=None, depth=0, xmltagname=None, header=False):
         if not elems:
             stream_.write('%s<%s%s />\n' % (indent, xmltagname, attr_str))
         else:
-            stream_.write('%s<%s%s>\n' % (indent, xmltagname, attr_str))
+            oneline = len(elems) == 1 and elems[0][0] is None
+            stream_.write('%s<%s%s>%s' % (indent, xmltagname, attr_str, ('\n','')[oneline]))
             for (k,v) in elems:
                 if k is None:
                     stream_.write('%s' % escape(str(v), {'\0': '&#00;'}))
                 else:
                     dump_xml(v, stream_, depth+1, xmltagname=k)
 
-            stream_.write('%s</%s>\n' % (indent, xmltagname))
+            stream_.write('%s</%s>\n' % ((indent,'')[oneline], xmltagname))
     else:
         stream_.write('%s<%s>%s</%s>\n' % (indent, xmltagname, escape(str(obj), {'\0': '&#00;'}), xmltagname))
 
