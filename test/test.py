@@ -148,7 +148,83 @@ class TestGuts(unittest.TestCase):
         self.assertEqual(dur.unit, 's')
         self.assertEqual(dur.uncertainty, float('0.1'))
         self.assertEqual(re.sub(r'\n\s*', '', dur.dump_xml()), s)
-    
+
+    def testPO(self):
+        class SKU(StringPattern):
+            pattern = '\\d{3}-[A-Z]{2}'
+
+        class Comment(String):
+            xmltagname = 'comment'
+
+        class Quantity(Int):
+            pass
+
+        class USAddress(Object):
+            country = String.T(default='US', optional=True, xmlstyle='attribute')
+            name = String.T()
+            street = String.T()
+            city = String.T()
+            state = String.T()
+            zip = Float.T()
+
+        class Item(Object):
+            part_num = SKU.T(xmlstyle='attribute')
+            product_name = String.T()
+            quantity = Quantity.T()
+            us_price = Float.T(xmltagname='USPrice')
+            comment = Comment.T(optional=True)
+            ship_date = DateTimestamp.T(optional=True)
+
+        class Items(Object):
+            item_list = List.T(Item.T())
+
+        class PurchaseOrderType(Object):
+            order_date = DateTimestamp.T(optional=True, xmlstyle='attribute')
+            ship_to = USAddress.T()
+            bill_to = USAddress.T()
+            comment = Comment.T(optional=True)
+            items = Items.T()
+
+        class PurchaseOrder(PurchaseOrderType):
+            xmltagname = 'purchaseOrder'
+
+        xml = '''<?xml version="1.0"?>
+<purchaseOrder orderDate="1999-10-20">
+   <shipTo country="US">
+      <name>Alice Smith</name>
+      <street>123 Maple Street</street>
+      <city>Mill Valley</city>
+      <state>CA</state>
+      <zip>90952</zip>
+   </shipTo>
+   <billTo country="US">
+      <name>Robert Smith</name>
+      <street>8 Oak Avenue</street>
+      <city>Old Town</city>
+      <state>PA</state>
+      <zip>95819</zip>
+   </billTo>
+   <comment>Hurry, my lawn is going wild</comment>
+   <items>
+      <item partNum="872-AA">
+         <productName>Lawnmower</productName>
+         <quantity>1</quantity>
+         <USPrice>148.95</USPrice>
+         <comment>Confirm this is electric</comment>
+      </item>
+      <item partNum="926-AA">
+         <productName>Baby Monitor</productName>
+         <quantity>1</quantity>
+         <USPrice>39.98</USPrice>
+         <shipDate>1999-05-21</shipDate>
+      </item>
+   </items>
+</purchaseOrder>
+'''
+        po1 = load_xml_string(xml) 
+        po2 = load_xml_string(po1.dump_xml())
+        
+        self.assertEqual(po1.dump(), po2.dump())
     
 def makeBasicTypeTest(Type, sample, sample_in=None, xml=False):
 
