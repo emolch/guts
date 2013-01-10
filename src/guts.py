@@ -146,14 +146,12 @@ class TBase(object):
     def init_propertystuff(cls):
         if not hasattr(cls, 'properties'):
             cls.properties = []
-            cls.property_names = []
             cls.xmltagname_to_name = {}
             cls.xmltagname_to_name_multivalued = {}
             cls.xmltagname_to_class = {}
             cls.content_property = None
         else:
             cls.properties = list(cls.properties)
-            cls.property_names = list(cls.property_names)
             cls.xmltagname_to_name = dict(cls.xmltagname_to_name)  
             cls.xmltagname_to_name_multivalued = dict(cls.xmltagname_to_name_multivalued) 
             cls.xmltagname_to_class = dict(cls.xmltagname_to_class) 
@@ -193,11 +191,40 @@ class TBase(object):
             assert False
 
     @classmethod
+    def get_property(cls, name):
+        for prop in cls.properties:
+            if prop.name == name:
+                return prop
+
+        raise ValueError()
+
+    @classmethod
+    def remove_property(cls, name):
+
+        prop = cls.get_property(name)
+        
+        if not prop.multivalued:
+            del cls.xmltagname_to_class[prop.effective_xmltagname]
+            del cls.xmltagname_to_name[prop.effective_xmltagname]
+        else:
+            del cls.xmltagname_to_class[prop.content_t.effective_xmltagname]
+            del cls.xmltagname_to_name_multivalued[prop.content_t.effective_xmltagname]
+
+        if cls.content_property == prop:
+            cls.content_property = None
+
+        cls.properties.remove(prop)
+
+        return prop
+
+    @classmethod
     def add_property(cls, name, prop):
 
-        cls.init_propertystuff()
-        if name in cls.property_names:
-            return
+        try:
+            oldprop = cls.remove_property(name)
+            prop.iprop = oldprop.iprop
+        except ValueError:
+            pass
 
         prop.instance = prop
         prop.name = name 
@@ -213,7 +240,6 @@ class TBase(object):
             cls.xmltagname_to_name_multivalued[prop.content_t.effective_xmltagname] = prop.name
 
         cls.properties.append(prop)
-        cls.property_names.append(prop.name)
 
         cls.properties.sort(key=lambda x: x.iprop)
 
