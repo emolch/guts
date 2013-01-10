@@ -230,7 +230,7 @@ class TBase(object):
 
         for prop in cls.properties:
             v = getattr(val, prop.name)
-            if not (prop.optional and v is None) and not (prop.multivalued and not v) and not (isinstance(prop, String.T) and prop._default is not None and not v):
+            if v is not None and (not (prop.optional or prop.multivalued) or prop.default() != v):
                 if xmlmode:
                     yield prop, prop.to_save_xml(v) 
                 else:
