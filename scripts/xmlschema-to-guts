@@ -145,6 +145,10 @@ class IntOrUnbounded(Object):
 class SchemaType(String):
     pass
 
+class OccurLimits(Object):
+    min_occurs = Int.T(optional=True)
+    max_occurs = IntOrUnbounded.T(optional=True)
+
 class Base(Object):
 
     def __init__(self, **kwargs):
@@ -156,6 +160,21 @@ class Base(Object):
             return self.namespace_map[nsshort], v
         else:
             return '', v
+
+    def occur_limits(self, ol=None):
+        min_occurs = None
+        max_occurs = None
+
+        if ol is not None:
+            min_occurs = ol.min_occurs
+            max_occurs = ol.max_occurs
+
+        if hasattr(self, 'min_occurs') and self.min_occurs is not None:
+            min_occurs = self.min_occurs
+        if hasattr(self, 'max_occurs') and self.max_occurs is not None:
+            max_occurs = self.max_occurs
+        
+        return OccurLimits(min_occurs=min_occurs, max_occurs=max_occurs)
     
 class Annotation(Base):
     documentation = String.T()
@@ -253,7 +272,7 @@ class Element(Base):
     default = String.T(optional=True)
     annotation = Annotation.T(optional=True)
 
-    def make_property_definition(self, patches, min_occurs=1, max_occurs=1):
+    def make_property_definition(self, patches, occur_limits=None):
 
         tagname = self.name
 
@@ -273,10 +292,16 @@ class Element(Base):
 
         name = guts.make_name_from_xmltagname(tagname)
         onename = name
-        if self.min_occurs is not None:
-            min_occurs = self.min_occurs
-        if self.max_occurs is not None:
-            max_occurs = self.max_occurs
+
+        ol = self.occur_limits(occur_limits)
+
+        min_occurs = ol.min_occurs
+        max_occurs = ol.max_occurs
+
+        if min_occurs is None:
+            min_occurs = 1
+        if max_occurs is None:
+            max_occurs = 1
 
         generate_list = max_occurs == -1
 
@@ -332,53 +357,51 @@ class Element(Base):
 class Any(Base):
     namespace = String.T()
     process_contents = String.T()
-    min_occurs = Int.T(default=1)
-    max_occurs = IntOrUnbounded.T(default=1)
+    min_occurs = Int.T(optional=True)
+    max_occurs = IntOrUnbounded.T(optional=True)
 
 
 class All(Base):
-    min_occurs = Int.T(default=1)
-    max_occurs = IntOrUnbounded.T(default=1)
+    min_occurs = Int.T(optional=True)
+    max_occurs = IntOrUnbounded.T(optional=True)
     element_list = List.T(Element.T())
 
     def make_property_definitions(self, patches):
         for element in self.element_list:
-            yield element.make_property_definition(patches, 
-                min_occurs=self.min_occurs,
-                max_occurs=self.max_occurs)
+            yield element.make_property_definition(patches, occur_limits=self.occur_limits())
 
 class Sequence(Base):
-    min_occurs = Int.T(default=1)
-    max_occurs = IntOrUnbounded.T(default=1)
+    min_occurs = Int.T(optional=True)
+    max_occurs = IntOrUnbounded.T(optional=True)
     element_list = List.T(Element.T())
     group_list = List.T(Defer('Group.T'))
     choice_list = List.T(Defer('Choice.T'))
     sequence_list = List.T(Defer('Sequence.T'))
     any_list = List.T(Any.T())
 
-    def make_property_definitions(self, patches):
+    def make_property_definitions(self, patches, occur_limits=None):
+
+        ol = self.occur_limits(occur_limits)
         for element in self.element_list:
-            yield element.make_property_definition(patches, 
-                min_occurs=self.min_occurs,
-                max_occurs=self.max_occurs)
+            yield element.make_property_definition(patches, occur_limits=ol)
 
         for sequence in self.sequence_list:
-            for x in sequence.make_property_definitions(patches):
+            for x in sequence.make_property_definitions(patches, occur_limits=ol):
                 yield x
 
         for choice in self.choice_list:
-            for x in choice.make_property_definitions(patches):
+            for x in choice.make_property_definitions(patches, occur_limits=ol):
                 yield x
 
         for group in self.group_list:
-            for x in group.make_property_definitions(patches):
+            for x in group.make_property_definitions(patches, occur_limits=ol):
                 yield x
             
 
 
 class Choice(Base):
-    min_occurs = Int.T(optional=True, default=1)
-    max_occurs = IntOrUnbounded.T(optional=True, default=1)
+    min_occurs = Int.T(optional=True)
+    max_occurs = IntOrUnbounded.T(optional=True)
     element_list = List.T(Element.T())
     group_list = List.T(Defer('Group.T'))
     choice_list = List.T(Defer('Choice.T'))
@@ -386,20 +409,22 @@ class Choice(Base):
     any_list = List.T(Any.T())
     annotation = Annotation.T(optional=True)
 
-    def make_property_definitions(self, patches):
+    def make_property_definitions(self, patches, occur_limits=None):
+
+        ol = self.occur_limits(occur_limits)
         for element in self.element_list:
-            yield element.make_property_definition(patches, min_occurs=self.min_occurs, max_occurs=self.max_occurs)
+            yield element.make_property_definition(patches, occur_limits=ol)
 
         for sequence in self.sequence_list:
-            for x in sequence.make_property_definitions(patches):
+            for x in sequence.make_property_definitions(patches, occur_limits=ol):
                 yield x
 
         for choice in self.choice_list:
-            for x in choice.make_property_definitions(patches):
+            for x in choice.make_property_definitions(patches, occur_limits=ol):
                 yield x
 
         for group in self.group_list:
-            for x in group.make_property_definitions(patches):
+            for x in group.make_property_definitions(patches, occur_limits=ol):
                 yield x
 
 
@@ -409,8 +434,8 @@ class Group(Base):
     all = All.T(optional=True)
     choice = Choice.T(optional=True)
     sequence = Sequence.T(optional=True)
-    min_occurs = Int.T(default=1)
-    max_occurs = IntOrUnbounded.T(default=1)
+    min_occurs = Int.T(optional=True)
+    max_occurs = IntOrUnbounded.T(optional=True)
     annotation = Annotation.T(optional=True)
 
     def dereference(self, g):
@@ -419,19 +444,26 @@ class Group(Base):
         self.all = g.all
         self.choice = g.choice
         self.sequence = g.sequence
-        self.annotation = g.annotation
+        if self.annotation is None:
+            self.annotation = g.annotation
+        if self.min_occurs is None:
+            self.min_occurs = g.min_occurs
+        if self.max_occurs is None:
+            self.max_occurs = g.max_occurs
 
-    def make_property_definitions(self, patches):
+    def make_property_definitions(self, patches, occur_limits=None):
+
+        ol = self.occur_limits(occur_limits)
         if self.choice:
-            for x in self.choice.make_property_definitions(patches):
+            for x in self.choice.make_property_definitions(patches, occur_limits=ol):
                 yield x
 
         if self.sequence:
-            for x in self.sequence.make_property_definitions(patches):
+            for x in self.sequence.make_property_definitions(patches, occur_limits=ol):
                 yield x
 
         if self.all:
-            for x in self.all.make_property_definitions(patches):
+            for x in self.all.make_property_definitions(patches, occur_limits=ol):
                 yield x
 
 
