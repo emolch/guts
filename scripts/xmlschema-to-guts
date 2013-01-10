@@ -362,8 +362,16 @@ class Sequence(Base):
                 min_occurs=self.min_occurs,
                 max_occurs=self.max_occurs)
 
+        for sequence in self.sequence_list:
+            for x in sequence.make_property_definitions(patches):
+                yield x
+
         for choice in self.choice_list:
             for x in choice.make_property_definitions(patches):
+                yield x
+
+        for group in self.group_list:
+            for x in group.make_property_definitions(patches):
                 yield x
             
 
@@ -382,6 +390,18 @@ class Choice(Base):
         for element in self.element_list:
             yield element.make_property_definition(patches, min_occurs=self.min_occurs, max_occurs=self.max_occurs)
 
+        for sequence in self.sequence_list:
+            for x in sequence.make_property_definitions(patches):
+                yield x
+
+        for choice in self.choice_list:
+            for x in choice.make_property_definitions(patches):
+                yield x
+
+        for group in self.group_list:
+            for x in group.make_property_definitions(patches):
+                yield x
+
 
 class Group(Base):
     name = String.T(optional=True)
@@ -393,13 +413,26 @@ class Group(Base):
     max_occurs = IntOrUnbounded.T(default=1)
     annotation = Annotation.T(optional=True)
 
+    def dereference(self, g):
+        self.name = g.name
+        self.ref = None
+        self.all = g.all
+        self.choice = g.choice
+        self.sequence = g.sequence
+        self.annotation = g.annotation
+
     def make_property_definitions(self, patches):
-        for x in choice.make_property_definitions(patches):
-            yield x
-        for x in sequence.make_property_definitions(patches):
-            yield x
-        for x in all.make_property_definitions(patches):
-            yield x
+        if self.choice:
+            for x in self.choice.make_property_definitions(patches):
+                yield x
+
+        if self.sequence:
+            for x in self.sequence.make_property_definitions(patches):
+                yield x
+
+        if self.all:
+            for x in self.all.make_property_definitions(patches):
+                yield x
 
 
 class XList(Base):
@@ -595,6 +628,18 @@ class schema(Base):
             if ag.ref:
                 typ = translate_type(ag.resolve_ns(ag.ref))
                 ag.dereference(ags[typ])
+
+
+        gs = {}
+        for path, g in walk(self, Group):
+            if not g.ref:
+                typ = translate_type(g.resolve_ns(g.name))
+                gs[typ] = g
+        
+        for path, g in walk(self, Group):
+            if g.ref:
+                typ = translate_type(g.resolve_ns(g.ref))
+                g.dereference(gs[typ])
 
     def make_code_patches(self, patches, base_dir_for_imports=None):
         for imp in self.import_list:
