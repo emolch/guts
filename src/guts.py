@@ -247,6 +247,11 @@ class TBase(object):
             cls.content_property = prop
 
     @classmethod
+    def ivals(cls, val):
+        for prop in cls.properties:
+            yield getattr(val, prop.name)
+
+    @classmethod
     def ipropvals(cls, val):
         for prop in cls.properties:
             yield prop, getattr(val, prop.name)
@@ -451,6 +456,9 @@ class Object(object):
 
     def validate(self, regularize=False, depth=-1):
         self.T.instance.validate(self, regularize, depth)
+
+    def regularize(self, depth=-1):
+        self.validate(regularize=True, depth=depth)
 
     def dump(self, stream=None, header=False):
         return dump(self, stream=stream, header=header)
