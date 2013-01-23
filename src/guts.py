@@ -141,6 +141,7 @@ class Defer:
 class TBase(object):
 
     multivalued = False
+    forced_regularize = False
 
     @classmethod
     def init_propertystuff(cls):
@@ -301,7 +302,7 @@ class TBase(object):
         if self.optional and val is None:
             return val
         
-        if not isinstance(val, self.cls):
+        if not isinstance(val, self.cls) or self.forced_regularize:
             if regularize:
                 try:
                     val = self.regularize_extra(val)
@@ -326,7 +327,7 @@ class TBase(object):
     def validate_children(self, val, regularize, depth):
         for prop, propval in self.ipropvals(val):
             newpropval = prop.validate(propval, regularize, depth-1)
-            if regularize and newpropval is not propval:
+            if regularize and (newpropval is not propval):
                 setattr(val, prop.name, newpropval)
 
         return val
