@@ -16,7 +16,7 @@ g_deferred_content = {}
 g_tagname_to_class = {}
 g_xmltagname_to_class = {}
 
-guts_types = [ 'Object', 'String', 'Int', 'Float', 'Complex', 'Bool', 
+guts_types = [ 'Object', 'String', 'Unicode', 'Int', 'Float', 'Complex', 'Bool', 
         'Timestamp', 'DateTimestamp', 'StringPattern', 'StringChoice', 'List', 'Tuple', 'Union' ]
 
 us_to_cc_regex = re.compile(r'([a-z])_([a-z])')
