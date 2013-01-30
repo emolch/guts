@@ -309,7 +309,8 @@ class TBase(object):
                 except (RegularizationError, ValueError):
                     raise ValidationError('%s: could not convert "%s" to type %s' % (self.xname(), val, self.cls.__name__))
             else:
-                raise ValidationError('%s: "%s" is not of type %s' % (self.xname(), val, self.cls.__name__))
+                if not isinstance(val, self.cls):
+                    raise ValidationError('%s: "%s" is not of type %s' % (self.xname(), val, self.cls.__name__))
 
         self.validate_extra(val)
 
@@ -524,6 +525,9 @@ class Bool(Object):
 
 class String(Object):
     dummy_for = str
+
+class Unicode(Object):
+    dummy_for = unicode
 
 class List(Object):
     dummy_for = list
