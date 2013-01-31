@@ -4,6 +4,9 @@ Guts
  
 Lightweight declarative YAML and XML data binding for Python
 
+Guts is written by Sebastian Heimann <sebastian.heimann@gfz-potsdam.de>.  It is
+released under the MIT license. See the file LICENSE for more details.
+
 Prerequisites
 -------------
 
