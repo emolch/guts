@@ -1,7 +1,7 @@
 '''Lightweight declarative YAML and XML data binding for Python.'''
 
 import yaml
-import datetime, calendar, re, sys, time, math
+import datetime, calendar, re, sys, time, math, types
 from itertools import izip
 from cStringIO import StringIO
 
@@ -44,6 +44,56 @@ def make_content_name(name):
         return name[:-1]
     else:
         return name
+
+def expand_stream_args(mode):
+    def wrap(f):
+        '''Decorator to enhance functions taking stream objects.
+
+        Wraps a function f(..., stream, ...) so that it can also be called as
+        f(..., filename='myfilename', ...) or as f(..., string='mydata', ...).
+        '''
+
+        def g(*args, **kwargs):
+            stream = kwargs.pop('stream', None)
+            filename = kwargs.pop('filename', None)
+            string = kwargs.pop('string', None)
+
+            assert sum( x is not None for x in (stream, filename, string) ) <= 1
+
+            if stream is not None:
+                kwargs['stream'] = stream
+                return f(*args, **kwargs)
+
+            if filename is not None:
+                    stream = open(filename, mode)
+                    kwargs['stream'] = stream
+                    retval = f(*args, **kwargs)
+                    if isinstance(retval, types.GeneratorType):
+                        def wrap_generator(gen):
+                            try:
+                                for x in gen:
+                                    yield x
+                            
+                            except GeneratorExit:
+                                pass
+
+                            stream.close()
+
+                        return wrap_generator(retval)
+
+                    else:
+                        stream.close()
+                        return retval
+
+            elif string is not None:
+                kwargs['stream'] = StringIO(string)
+                return f(*args, **kwargs)
+            
+            else:
+                return f(*args, **kwargs)
+
+        return g
+    return wrap
 
 class FractionalSecondsMissing(Exception):
     '''Exception raised by :py:func:`str_to_time` when the given string lacks
@@ -742,11 +792,10 @@ class Union(Object):
 
             raise e
 
+@expand_stream_args('w')
 def dump(object, stream=None, header=False, _dump_function=yaml.safe_dump):
     if stream is None:
         stream_ = StringIO()
-    elif isinstance(stream, basestring):
-        stream_ = open(stream, 'w')
     else:
         stream_ = stream
 
@@ -764,36 +813,22 @@ def dump(object, stream=None, header=False, _dump_function=yaml.safe_dump):
 
     if stream is None:
         return stream_.getvalue()
-    elif isinstance(stream, basestring):
-        stream_.close()
 
+@expand_stream_args('w')
 def dump_all(object, stream=None, header=True):
     return dump(object, stream=stream, header=header, _dump_function=yaml.safe_dump_all)
 
-
+@expand_stream_args('r')
 def load(stream):
     return yaml.safe_load(stream)
 
-def load_string(s):
-    stream = StringIO(s)
-    return load(stream)
-
+@expand_stream_args('r')
 def load_all(stream):
-    if isinstance(stream, basestring):
-        stream_ = open(stream, 'r')
-    else:
-        stream_ = stream
-    
-    l = list(yaml.safe_load_all(stream_))
+    return list(yaml.safe_load_all(stream))
 
-    if isinstance(stream, basestring):
-        stream_.close()
-
-    return l
-
-def load_all_string(s):
-    stream = StringIO(s)
-    return load_all(stream)
+@expand_stream_args('r')
+def iload_all(stream):
+    return yaml.safe_load_all(stream)
 
 def multi_representer(dumper, data):
     node = dumper.represent_mapping('!'+data.T.tagname, 
@@ -875,7 +910,8 @@ class Constructor(object):
         self.queue = []
         return queue 
 
-def load_xml(stream, bufsize=100000, add_namespace_maps=False, strict=False):
+@expand_stream_args('r')
+def iload_all_xml(stream, bufsize=100000, add_namespace_maps=False, strict=False):
     from xml.parsers.expat import ParserCreate
 
     parser = ParserCreate(namespace_separator=' ')
@@ -897,19 +933,32 @@ def load_xml(stream, bufsize=100000, add_namespace_maps=False, strict=False):
         if not data:
             break
 
+@expand_stream_args('r')
+def load_all_xml(*args, **kwargs):
+    return list(iload_all_xml(*args, **kwargs))
 
-def load_xml_string(s, strict=False):
-    stream = StringIO(s)
-    return list(load_xml(stream, strict=strict))[0]
+@expand_stream_args('r')
+def load_xml(*args, **kwargs):
+    g = iload_all_xml(*args, **kwargs)
+    return g.next()
 
+@expand_stream_args('w')
+def dump_all_xml(objects, *args, **kwargs):
+    l = []
+    for object in objects:
+        l.append(dump_xml(object, *args, **kwargs))
+        
+    if kwargs.get('stream', None) is None:
+        return ''.join(l)
 
+        
+
+@expand_stream_args('w')
 def dump_xml(obj, stream=None, depth=0, xmltagname=None, header=False):
     from xml.sax.saxutils import escape, quoteattr
 
     if stream is None:
         stream_ = StringIO()
-    elif isinstance(stream, basestring):
-        stream_ = open(stream, 'w')
     else:
         stream_ = stream
         
@@ -974,9 +1023,6 @@ def dump_xml(obj, stream=None, depth=0, xmltagname=None, header=False):
     if stream is None:
         return stream_.getvalue()
 
-    elif isinstance(stream, basestring):
-        stream_.close()
-
 def walk(x, typ=None, path=[]):
     if typ is None or isinstance(x, typ):
         yield path, x
@@ -991,8 +1037,10 @@ def walk(x, typ=None, path=[]):
                     yield y
 
 __all__ = guts_types + [ 'guts_types', 'TBase', 'ValidationError', 'ArgumentError', 'Defer', 
-        'dump', 'dump_all', 'load', 'load_string', 'load_all', 
-        'load_all_string', 'load_xml', 'load_xml_string', 'dump_xml',
+        'dump', 'dump_all', 
+        'load', 'load_all', 'iload_all',
+        'dump_xml', 'dump_all_xml',
+        'load_xml', 'load_all_xml', 'iload_all_xml',
         'make_typed_list_class', 'walk'
         ] 
 
