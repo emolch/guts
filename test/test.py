@@ -225,7 +225,88 @@ class TestGuts(unittest.TestCase):
         po2 = load_xml_string(po1.dump_xml())
         
         self.assertEqual(po1.dump(), po2.dump())
+
+    def testDumpLoad(self):
+
+        from tempfile import NamedTemporaryFile as NTF
+        from cStringIO import StringIO
+
+        class A(Object):
+            xmltagname = 'a'
+            p = Int.T()
+
+        a1 = A(p=33)
+        an = [ a1, a1, a1 ]
+
+        def check1(a,b):
+            self.assertEqual(a.p, b.p)
+
+        def checkn(a,b):
+            for ea, eb in zip(a,b):
+                self.assertEqual(ea.p, eb.p)
+
+        for (a, xdump, xload, check) in [
+                    (a1, dump, load, check1), 
+                    (a1, dump_xml, load_xml, check1),
+                    (an, dump_all, load_all, checkn), 
+                    (an, dump_all, iload_all, checkn), 
+                    (an, dump_all_xml, load_all_xml, checkn),
+                    (an, dump_all_xml, iload_all_xml, checkn)
+                ]:
+
+            for header in (False, True, 'custom header'):
+                # via string
+                s = xdump(a, header=header)
+                b = xload(string=s)
+                check(a,b)
+
+                # via file
+                f = NTF()
+                xdump(a, filename=f.name, header=header)
+                b = xload(filename=f.name)
+                check(a,b)
+                f.close()
+
+                # via stream
+                f = NTF()
+                xdump(a, stream=f, header=header)
+                f.seek(0)
+                b = xload(stream=f)
+                check(a,b)
+                f.close()
+
+        b1 = A.load(string=a1.dump())
+        check1(a1,b1)
+
+        f = NTF()
+        a1.dump(filename=f.name)
+        b1 = A.load(filename=f.name)
+        check1(a1,b1)
+        f.close()
+
+        f = NTF()
+        a1.dump(stream=f)
+        f.seek(0)
+        b1 = A.load(stream=f)
+        check1(a1,b1)
+        f.close()
     
+        b1 = A.load_xml(string=a1.dump_xml())
+        check1(a1,b1)
+
+        f = NTF()
+        a1.dump_xml(filename=f.name)
+        b1 = A.load_xml(filename=f.name)
+        check1(a1,b1)
+        f.close()
+
+        f = NTF()
+        a1.dump_xml(stream=f)
+        f.seek(0)
+        b1 = A.load_xml(stream=f)
+        check1(a1,b1)
+        f.close()
+
 def makeBasicTypeTest(Type, sample, sample_in=None, xml=False):
 
     if sample_in is None:

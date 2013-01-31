@@ -6,9 +6,6 @@ from itertools import izip
 from cStringIO import StringIO
 
 g_iprop = 0
-g_banner = '''
-Experimental guts data model.
-'''
 
 g_deferred = {}
 g_deferred_content = {}
@@ -64,33 +61,38 @@ def expand_stream_args(mode):
                 kwargs['stream'] = stream
                 return f(*args, **kwargs)
 
-            if filename is not None:
-                    stream = open(filename, mode)
-                    kwargs['stream'] = stream
-                    retval = f(*args, **kwargs)
-                    if isinstance(retval, types.GeneratorType):
-                        def wrap_generator(gen):
-                            try:
-                                for x in gen:
-                                    yield x
-                            
-                            except GeneratorExit:
-                                pass
+            elif filename is not None:
+                stream = open(filename, mode)
+                kwargs['stream'] = stream
+                retval = f(*args, **kwargs)
+                if isinstance(retval, types.GeneratorType):
+                    def wrap_generator(gen):
+                        try:
+                            for x in gen:
+                                yield x
+                        
+                        except GeneratorExit:
+                            pass
 
-                            stream.close()
-
-                        return wrap_generator(retval)
-
-                    else:
                         stream.close()
-                        return retval
+
+                    return wrap_generator(retval)
+
+                else:
+                    stream.close()
+                    return retval
 
             elif string is not None:
+                assert mode == 'r'
                 kwargs['stream'] = StringIO(string)
                 return f(*args, **kwargs)
             
             else:
-                return f(*args, **kwargs)
+                assert mode == 'w'
+                sout = StringIO()
+                f(stream=sout, *args, **kwargs)
+                return sout.getvalue()
+
 
         return g
     return wrap
@@ -512,15 +514,19 @@ class Object(object):
     def regularize(self, depth=-1):
         self.validate(regularize=True, depth=depth)
 
-    def dump(self, stream=None, header=False):
-        return dump(self, stream=stream, header=header)
+    def dump(self, stream=None, filename=None, header=False):
+        return dump(self, stream=stream, filename=filename, header=header)
 
-    def dump_xml(self, stream=None, header=False):
-        return dump_xml(self, stream=stream, header=header)
+    def dump_xml(self, stream=None, filename=None, header=False):
+        return dump_xml(self, stream=stream, filename=filename, header=header)
 
     @classmethod
-    def load(cls, stream):
-        return load(stream)
+    def load(cls, stream=None, filename=None, string=None):
+        return load(stream=stream, filename=filename, string=string)
+
+    @classmethod
+    def load_xml(cls, stream=None, filename=None, string=None):
+        return load_xml(stream=stream, filename=filename, string=string)
 
     def __str__(self):
         return self.dump()
@@ -792,43 +798,28 @@ class Union(Object):
 
             raise e
 
-@expand_stream_args('w')
-def dump(object, stream=None, header=False, _dump_function=yaml.safe_dump):
-    if stream is None:
-        stream_ = StringIO()
-    else:
-        stream_ = stream
+def _dump(object, stream, header=False, _dump_function=yaml.safe_dump):
 
     if header:
-        if isinstance(header, str):
-            banner = header
-        else:
-            banner = g_banner
+        stream.write('%YAML 1.1\n')
+        if isinstance(header, basestring):
+            banner = '\n'.join( '# ' + x for x in header.splitlines() )
+            stream.write(banner)
+            stream.write('\n')
 
-        banner = '\n'.join( '# ' + x for x in banner.splitlines() )
+    _dump_function(object, stream=stream, explicit_start=True)
 
-        stream_.write(banner)
+def _dump_all(object, stream, header=True):
+    _dump(object, stream=stream, header=header, _dump_function=yaml.safe_dump_all)
 
-    _dump_function(object, stream=stream_, explicit_start=True)
+def _load(stream):
+    return yaml.safe_load(stream=stream)
 
-    if stream is None:
-        return stream_.getvalue()
+def _load_all(stream):
+    return list(yaml.safe_load_all(stream=stream))
 
-@expand_stream_args('w')
-def dump_all(object, stream=None, header=True):
-    return dump(object, stream=stream, header=header, _dump_function=yaml.safe_dump_all)
-
-@expand_stream_args('r')
-def load(stream):
-    return yaml.safe_load(stream)
-
-@expand_stream_args('r')
-def load_all(stream):
-    return list(yaml.safe_load_all(stream))
-
-@expand_stream_args('r')
-def iload_all(stream):
-    return yaml.safe_load_all(stream)
+def _iload_all(stream):
+    return yaml.safe_load_all(stream=stream)
 
 def multi_representer(dumper, data):
     node = dumper.represent_mapping('!'+data.T.tagname, 
@@ -910,8 +901,7 @@ class Constructor(object):
         self.queue = []
         return queue 
 
-@expand_stream_args('r')
-def iload_all_xml(stream, bufsize=100000, add_namespace_maps=False, strict=False):
+def _iload_all_xml(stream, bufsize=100000, add_namespace_maps=False, strict=False):
     from xml.parsers.expat import ParserCreate
 
     parser = ParserCreate(namespace_separator=' ')
@@ -933,44 +923,42 @@ def iload_all_xml(stream, bufsize=100000, add_namespace_maps=False, strict=False
         if not data:
             break
 
-@expand_stream_args('r')
-def load_all_xml(*args, **kwargs):
-    return list(iload_all_xml(*args, **kwargs))
+def _load_all_xml(*args, **kwargs):
+    return list(_iload_all_xml(*args, **kwargs))
 
-@expand_stream_args('r')
-def load_xml(*args, **kwargs):
-    g = iload_all_xml(*args, **kwargs)
+def _load_xml(*args, **kwargs):
+    g = _iload_all_xml(*args, **kwargs)
     return g.next()
 
-@expand_stream_args('w')
-def dump_all_xml(objects, *args, **kwargs):
-    l = []
+
+def _dump_all_xml(objects, stream, root_element_name='root', header=True):
+
+    _dump_xml_header(stream, header)
+
+    beg = '<%s>\n' % root_element_name
+    end = '</%s>\n' % root_element_name
+
+    stream.write(beg)
+
     for object in objects:
-        l.append(dump_xml(object, *args, **kwargs))
+        _dump_xml(object, stream=stream)
         
-    if kwargs.get('stream', None) is None:
-        return ''.join(l)
+    stream.write(end)
 
-        
+def _dump_xml_header(stream, banner=None):
 
-@expand_stream_args('w')
-def dump_xml(obj, stream=None, depth=0, xmltagname=None, header=False):
+    stream.write('<?xml version="1.0" encoding="UTF-8" ?>\n')
+    if isinstance(banner, basestring):
+        stream.write('<!-- ')
+        stream.write(banner)
+        stream.write(' -->\n')
+
+
+def _dump_xml(obj, stream, depth=0, xmltagname=None, header=False):
     from xml.sax.saxutils import escape, quoteattr
-
-    if stream is None:
-        stream_ = StringIO()
-    else:
-        stream_ = stream
         
     if depth == 0 and header:
-        if isinstance(header, str):
-            banner = header
-        else:
-            banner = g_banner
-
-        banner = '<!-- ' + banner + ' -->'
-
-        stream_.write(banner)
+        _dump_xml_header(stream, header)
 
     indent = ' '*depth*2
     if xmltagname is None:
@@ -1006,22 +994,19 @@ def dump_xml(obj, stream=None, depth=0, xmltagname=None, header=False):
             attr_str = ' ' + ' '.join( '%s=%s' % (k,quoteattr(v)) for (k,v) in attrs )
             
         if not elems:
-            stream_.write('%s<%s%s />\n' % (indent, xmltagname, attr_str))
+            stream.write('%s<%s%s />\n' % (indent, xmltagname, attr_str))
         else:
             oneline = len(elems) == 1 and elems[0][0] is None
-            stream_.write('%s<%s%s>%s' % (indent, xmltagname, attr_str, ('\n','')[oneline]))
+            stream.write('%s<%s%s>%s' % (indent, xmltagname, attr_str, ('\n','')[oneline]))
             for (k,v) in elems:
                 if k is None:
-                    stream_.write('%s' % escape(str(v), {'\0': '&#00;'}))
+                    stream.write('%s' % escape(str(v), {'\0': '&#00;'}))
                 else:
-                    dump_xml(v, stream_, depth+1, xmltagname=k)
+                    _dump_xml(v, stream=stream, depth=depth+1, xmltagname=k)
 
-            stream_.write('%s</%s>\n' % ((indent,'')[oneline], xmltagname))
+            stream.write('%s</%s>\n' % ((indent,'')[oneline], xmltagname))
     else:
-        stream_.write('%s<%s>%s</%s>\n' % (indent, xmltagname, escape(str(obj), {'\0': '&#00;'}), xmltagname))
-
-    if stream is None:
-        return stream_.getvalue()
+        stream.write('%s<%s>%s</%s>\n' % (indent, xmltagname, escape(str(obj), {'\0': '&#00;'}), xmltagname))
 
 def walk(x, typ=None, path=[]):
     if typ is None or isinstance(x, typ):
@@ -1036,11 +1021,63 @@ def walk(x, typ=None, path=[]):
                 for y in walk(val, typ, path=path+[prop.name]):
                     yield y
 
-__all__ = guts_types + [ 'guts_types', 'TBase', 'ValidationError', 'ArgumentError', 'Defer', 
-        'dump', 'dump_all', 
-        'load', 'load_all', 'iload_all',
-        'dump_xml', 'dump_all_xml',
-        'load_xml', 'load_all_xml', 'iload_all_xml',
+
+@expand_stream_args('w')
+def dump(*args, **kwargs):
+    return _dump(*args, **kwargs)
+
+@expand_stream_args('r')
+def load(*args, **kwargs):
+    return _load(*args, **kwargs)
+
+def load_string(s, *args, **kwargs):
+    return load(string=s, *args, **kwargs)
+
+@expand_stream_args('w')
+def dump_all(*args, **kwargs):
+    return _dump_all(*args, **kwargs)
+
+@expand_stream_args('r')
+def load_all(*args, **kwargs):
+    return _load_all(*args, **kwargs)
+
+@expand_stream_args('r')
+def iload_all(*args, **kwargs):
+    return _iload_all(*args, **kwargs)
+
+
+@expand_stream_args('w')
+def dump_xml(*args, **kwargs):
+    return _dump_xml(*args, **kwargs)
+
+@expand_stream_args('r')
+def load_xml(*args, **kwargs):
+    return _load_xml(*args, **kwargs)
+
+def load_xml_string(s, *args, **kwargs):
+    return load_xml(string=s, *args, **kwargs)
+
+@expand_stream_args('w')
+def dump_all_xml(*args, **kwargs):
+    return _dump_all_xml(*args, **kwargs)
+
+@expand_stream_args('r')
+def load_all_xml(*args, **kwargs):
+    return _load_all_xml(*args, **kwargs)
+
+@expand_stream_args('r')
+def iload_all_xml(*args, **kwargs):
+    return _iload_all_xml(*args, **kwargs)
+
+
+__all__ = guts_types + [ 'guts_types', 'TBase', 'ValidationError', 
+        'ArgumentError', 'Defer', 
+        'dump', 'load',
+        'dump_all', 'load_all', 'iload_all',
+        'dump_xml', 'load_xml', 
+        'dump_all_xml', 'load_all_xml', 'iload_all_xml',
+        'load_string',
+        'load_xml_string',
         'make_typed_list_class', 'walk'
         ] 
 
