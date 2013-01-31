@@ -85,10 +85,10 @@ Objects can regularize themselves:
 
 ```pycon
 >>> song2.year = '1977'
->>> song2.validate(regularize=True)
+>>> song2.regularize()
 >>> song2.year
 1977
->>> type(song2)
+>>> type(song2.year)
 <type 'int'>
 ```
 
@@ -98,11 +98,17 @@ They also deserialize from YAML and XML:
 >>> playlist2 = load_string(playlist.dump())
 >>> playlist3 = load_xml_string(playlist.dump_xml())
 ```
-Incremental loading of large XML files is supported with the `guts.load_xml()` function, which is built as an iterator yielding Guts objects.
 
-This module comes with a rudimentary code generator `xmlschema-to-guts` to turn (some) XML Schema definitions (XSD) into Python modules containing Guts class hierarchies. 
+Incremental loading of large YAML or XML files is supported with the
+`guts.iload_all()` and `guts.iload_all_xml()` functions, which are buildt to
+return generators yielding Guts objects.
 
-Here is an example using the first example in the W3C XML Schema Primer. The Schema shall be defined in `po.xsd`:
+This module comes with a rudimentary code generator `xmlschema-to-guts` to turn
+(some) XML Schema definitions (XSD) into Python modules containing Guts class
+hierarchies. 
+
+Here is an example using the first example in the W3C XML Schema Primer. The
+Schema shall be defined in `po.xsd`:
 
 ```xml
 <xsd:schema xmlns:xsd="http://www.w3.org/2001/XMLSchema">
@@ -271,9 +277,8 @@ And we can use it e.g. to parse the example XML file `po.xml` from above:
 
 ```pycon
 >>> from po import *
->>> for x in load_xml(open('po.xml')):
-...     print x.dump() # emits YAML
-...
+>>> order = load_xml(filename='po.xml')
+>>> print order  # dumps YAML
 --- !po.PurchaseOrder
 order_date: '1999-10-20'
 ship_to: !po.USAddress

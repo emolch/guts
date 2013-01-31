@@ -625,11 +625,8 @@ class Import(Base):
         else:
             fn = self.schema_location
 
-        with open(fn) as f:
-            s =  list(load_xml(f, add_namespace_maps=True))[0]
-            return s.make_code_patches(patches)
-
-
+        s =  load_xml(filename=fn, add_namespace_maps=True)
+        return s.make_code_patches(patches)
 
 
 class schema(Base):
@@ -735,7 +732,7 @@ if len(sys.argv) != 2:
 
 fn = sys.argv[1]
 
-s =  list(load_xml(open(fn, 'r'), add_namespace_maps=True))[0]
+s = load_xml(filename=fn, add_namespace_maps=True)
 
 print 'from guts import *'
 print
