@@ -538,6 +538,11 @@ class Any(Object):
 class Int(Object):
     dummy_for = int
 
+    class __T(TBase):
+
+        def to_save_xml(self, value):
+            return repr(value)
+
 class Float(Object):
     dummy_for = float
 
@@ -692,18 +697,24 @@ class Timestamp(Object):
     class __T(TBase):
 
         def regularize_extra(self, val):
-            if isinstance(val, datetime.datetime):
+            if isinstance(val, datetime.date):
+                tt = val.timetuple()
+                val = float(calendar.timegm(tt))
+
+            elif isinstance(val, datetime.datetime):
                 tt = val.utctimetuple()
                 val = calendar.timegm(tt) + val.microsecond * 1e-6  
 
             elif isinstance(val, str) or isinstance(val, unicode):
                 val = val.rstrip('Z')
                 val = val.replace('T', ' ')
-
                 val = str_to_time(val)
             
             elif isinstance(val, int):
                 val = float(val)
+
+            else:
+                raise ValidationError('%s: cannot convert "%s" to float' % (self.xname(), val))
 
             return val
         
