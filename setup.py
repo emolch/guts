@@ -10,7 +10,7 @@ setup(
     scripts = [ 'scripts/xmlschema-to-guts' ],
     author = 'Sebastian Heimann',
     author_email = 'sebastian.heimann@gfz-potsdam.de',
-    url = 'http://emolch.github.com/guts/',
+    url = 'https://github.com/emolch/guts/',
     keywords = [ 'data-binding', 'xml', 'yaml' ],
     classifiers = [
         'Development Status :: 4 - Beta',
