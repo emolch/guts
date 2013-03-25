@@ -223,7 +223,10 @@ class TBase(object):
         self.xmlstyle = xmlstyle
 
     def default(self):
-        return self._default
+        if isinstance(self._default, DefaultMaker):
+            return self._default.make()
+        else:
+            return self._default
 
     def xname(self):
         if self.name is not None:
@@ -490,6 +493,15 @@ class RegularizationError(Exception):
 class ArgumentError(Exception):
     pass
 
+class DefaultMaker:
+    def __init__(self, cls, args, kwargs):
+        self.cls = cls
+        self.args = args
+        self.kwargs = kwargs
+    
+    def make(self):
+        return self.cls(*self.args, **self.kwargs)
+
 class Object(object):
     __metaclass__ = ObjectMetaClass
     dummy_for = None
@@ -507,6 +519,10 @@ class Object(object):
         
         if kwargs:
             raise ArgumentError('Invalid argument to %s: %s' % (self.T.tagname, ', '.join(kwargs.keys())))
+
+    @classmethod
+    def D(cls, *args, **kwargs):
+        return DefaultMaker(cls, args, kwargs)
 
     def validate(self, regularize=False, depth=-1):
         self.T.instance.validate(self, regularize, depth)
