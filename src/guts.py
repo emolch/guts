@@ -619,7 +619,10 @@ class List(Object):
             self.content_t.parent = self
 
         def default(self):
-            return []
+            if self._default is not None:
+                return self._default
+            else:
+                return []
 
         def validate(self, val, regularize, depth):
             return TBase.validate(self, val, regularize, depth+1)
@@ -864,6 +867,7 @@ def multi_constructor(loader, tag_suffix, node):
 
 yaml.add_multi_representer(Object, multi_representer, Dumper=yaml.SafeDumper)
 yaml.add_multi_constructor('!', multi_constructor, Loader=yaml.SafeLoader)
+
 
 class Constructor(object):
     def __init__(self, add_namespace_maps=False, strict=False):
