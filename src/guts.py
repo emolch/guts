@@ -313,6 +313,11 @@ class TBase(object):
             yield prop, getattr(val, prop.name)
 
     @classmethod
+    def inamevals(cls, val):
+        for prop in cls.properties:
+            yield prop.name, getattr(val, prop.name)
+
+    @classmethod
     def ipropvals_to_save(cls, val, xmlmode=False):
 
         for prop in cls.properties:
