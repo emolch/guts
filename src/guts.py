@@ -83,12 +83,12 @@ def expand_stream_args(mode):
                     return retval
 
             elif string is not None:
-                assert mode == 'r'
+                assert mode == 'r' 'Keyword argument string=... cannot be used in dumper function.'
                 kwargs['stream'] = StringIO(string)
                 return f(*args, **kwargs)
             
             else:
-                assert mode == 'w'
+                assert mode == 'w', 'Use keyword argument stream=... or filename=... in loader function.'
                 sout = StringIO()
                 f(stream=sout, *args, **kwargs)
                 return sout.getvalue()
