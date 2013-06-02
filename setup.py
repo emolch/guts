@@ -6,7 +6,7 @@ setup(
     version = '0.1',
     description = 'Lightweight declarative YAML and XML data binding for Python.',
     package_dir = { '': 'src' },
-    py_modules = ['guts'],
+    py_modules = ['guts', 'guts_array'],
     scripts = [ 'scripts/xmlschema-to-guts' ],
     author = 'Sebastian Heimann',
     author_email = 'sebastian.heimann@gfz-potsdam.de',
