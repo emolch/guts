@@ -738,13 +738,13 @@ class Timestamp(Object):
     class __T(TBase):
 
         def regularize_extra(self, val):
-            if isinstance(val, datetime.date):
-                tt = val.timetuple()
-                val = float(calendar.timegm(tt))
-
-            elif isinstance(val, datetime.datetime):
+            if isinstance(val, datetime.datetime):
                 tt = val.utctimetuple()
                 val = calendar.timegm(tt) + val.microsecond * 1e-6  
+
+            elif isinstance(val, datetime.date):
+                tt = val.timetuple()
+                val = float(calendar.timegm(tt))
 
             elif isinstance(val, str) or isinstance(val, unicode):
                 val = val.rstrip('Z')
