@@ -322,7 +322,7 @@ class TBase(object):
 
         for prop in cls.properties:
             v = getattr(val, prop.name)
-            if v is not None and (not (prop.optional or prop.multivalued) or prop.default() != v):
+            if v is not None and (not (prop.optional or (prop.multivalued and not v)) or prop.default() != v):
                 if xmlmode:
                     yield prop, prop.to_save_xml(v) 
                 else:
@@ -695,7 +695,10 @@ class Tuple(Object):
             self.n = n
 
         def default(self):
-            return tuple( self.content_t.default() for x in xrange(self.n) )
+            if self._default is not None:
+                return self._default
+            else:
+                return tuple( self.content_t.default() for x in xrange(self.n) )
 
         def validate(self, val, regularize, depth):
             return TBase.validate(self, val, regularize, depth+1)
