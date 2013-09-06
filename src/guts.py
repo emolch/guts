@@ -13,7 +13,7 @@ g_deferred_content = {}
 g_tagname_to_class = {}
 g_xmltagname_to_class = {}
 
-guts_types = [ 'Object', 'String', 'Unicode', 'Int', 'Float', 'Complex', 'Bool', 
+guts_types = [ 'Object', 'SObject', 'String', 'Unicode', 'Int', 'Float', 'Complex', 'Bool', 
         'Timestamp', 'DateTimestamp', 'StringPattern', 'StringChoice', 'List', 'Tuple', 'Union' ]
 
 us_to_cc_regex = re.compile(r'([a-z])_([a-z])')
@@ -83,7 +83,7 @@ def expand_stream_args(mode):
                     return retval
 
             elif string is not None:
-                assert mode == 'r' 'Keyword argument string=... cannot be used in dumper function.'
+                assert mode == 'r', 'Keyword argument string=... cannot be used in dumper function.'
                 kwargs['stream'] = StringIO(string)
                 return f(*args, **kwargs)
             
@@ -553,8 +553,25 @@ class Object(object):
         return self.dump()
 
 
+class SObject(Object):
+    
+    class __T(TBase):
+        def regularize_extra(self, val):
+            if isinstance(val, basestring):
+                return self.cls(val)
+
+            return val
+
+        def to_save(self, val):
+            return str(val)
+
+        def to_save_xml(self, val):
+            return str(val)
+
+
 class Any(Object):
     pass
+
 
 class Int(Object):
     dummy_for = int
