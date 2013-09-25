@@ -497,7 +497,7 @@ class SimpleType(Base):
                 (classname, ',\n        '.join([ "'%s'" % e for e in enum]))
 
         elif r and r.pattern:
-            classdef = 'class %s(StringPattern):\n    pattern = %s' % (classname, repr(r.pattern.value))
+            classdef = 'class %s(StringPattern):\n    pattern = %s' % (classname, repr('^'+r.pattern.value+'$'))
 
         elif r and r.base and r.pattern is None and not r.enumeration_list:
             basename = translate_type(r.resolve_ns(r.base))

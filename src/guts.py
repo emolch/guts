@@ -807,8 +807,8 @@ class StringPattern(String):
                 self.pattern = self.dummy_cls.pattern
 
         def validate_extra(self, val):
-            pat = '^'+self.pattern+'$'
-            if not re.match(pat, val):
+            pat = self.pattern
+            if not re.search(pat, val):
                 raise ValidationError('%s: "%s" does not match pattern %s' % (self.xname(), val, pat))
 
 
