@@ -3,7 +3,7 @@ from distutils.core import setup
 
 setup(
     name    = 'guts',
-    version = '0.1',
+    version = '0.2',
     description = 'Lightweight declarative YAML and XML data binding for Python.',
     package_dir = { '': 'src' },
     py_modules = ['guts', 'guts_array'],
