@@ -211,7 +211,8 @@ class TBase(object):
             cls.content_property = cls.content_property
 
 
-    def __init__(self, default=None, optional=False, xmlstyle='element', xmltagname=None):
+    def __init__(self, default=None, optional=False, xmlstyle='element', xmltagname=None, help=None):
+
         global g_iprop
         self.iprop = g_iprop
         g_iprop += 1
@@ -221,6 +222,7 @@ class TBase(object):
         self._xmltagname = xmltagname
         self.parent = None
         self.xmlstyle = xmlstyle
+        self.help = help
 
     def default(self):
         if isinstance(self._default, DefaultMaker):
@@ -402,6 +404,58 @@ class TBase(object):
     def deferred(self):
         return []
 
+    def classname_for_help(self):
+        if self.dummy_cls in guts_plain_dummy_types:
+            return '``%s``' % self.cls.__name__
+        else:
+            return ':py:class:`%s`' % self.tagname
+
+    @classmethod
+    def props_help_string(cls):
+        l = []
+        l.append('')
+        for prop in cls.properties:
+            descr = [ prop.classname_for_help() ]
+            if prop.optional:
+                descr.append('*optional*')
+
+            d = prop.default()
+            if d is not None:
+                descr.append('*default:* ``%s``' % repr(d))
+            
+            l.append('   .. py:attribute:: %s' % prop.name)
+            l.append('')
+            l.append('      %s' % ', '.join(descr))
+            l.append('')
+
+        return '\n'.join(l)
+
+    @classmethod
+    def class_help_string(cls):
+        return cls.__doc__
+
+    @classmethod
+    def class_signature(cls):
+        l = []
+        for prop in cls.properties:
+            d = prop.default()
+            if d is not None:
+                arg = repr(d)
+
+            elif prop.optional:
+                arg = 'None'
+
+            else:
+                arg = '...'
+
+            l.append('%s=%s' % (prop.name, arg))
+
+        return '(%s)' % ', '.join(l)
+
+    @classmethod
+    def help(cls):
+        return cls.props_help_string()
+
 
 class ObjectMetaClass(type):
     def __new__(meta, classname, bases, class_dict):
@@ -486,6 +540,15 @@ class ObjectMetaClass(type):
 
             cls.T = T
             T.instance = T()
+
+            cls.__doc_template__ = cls.__doc__
+
+            cls.__doc__ = T.class_help_string()
+
+            if cls.__doc__ is None:
+                cls.__doc__ = 'Undocumented.'
+
+            cls.__doc__ += '\n' + T.props_help_string()
 
         return cls
 
@@ -628,6 +691,8 @@ class String(Object):
 class Unicode(Object):
     dummy_for = unicode
 
+guts_plain_dummy_types = (String, Unicode, Int, Float, Complex, Bool)
+
 class List(Object):
     dummy_for = list
 
@@ -673,6 +738,9 @@ class List(Object):
             if defer is self.content_t:
                 self.content_t = t_inst
 
+        def classname_for_help(self):
+            return '``list`` of %s objects' % self.content_t.classname_for_help()
+
 def make_typed_list_class(t):
     class O(List):
         class __T(List.T):
@@ -697,6 +765,8 @@ class Tuple(Object):
         def default(self):
             if self._default is not None:
                 return self._default
+            elif self.optional:
+                return None
             else:
                 return tuple( self.content_t.default() for x in xrange(self.n) )
 
@@ -734,6 +804,9 @@ class Tuple(Object):
 
         def to_save_xml(self, val):
             return [ self.content_t.to_save_xml(v) for v in val ]
+
+        def classname_for_help(self):
+            return '``tuple`` of %i %s objects' % (self.n, self.content_t.classname_for_help() )
 
 class Timestamp(Object):
     dummy_for = float
@@ -794,6 +867,9 @@ class DateTimestamp(Object):
             return time_to_str(val, format='%Y-%m-%d')
 
 class StringPattern(String):
+
+    '''Any ``str`` matching pattern ``%(pattern)s``.'''
+
     dummy_for = str
     pattern = '.*'
 
@@ -809,10 +885,19 @@ class StringPattern(String):
         def validate_extra(self, val):
             pat = self.pattern
             if not re.search(pat, val):
-                raise ValidationError('%s: "%s" does not match pattern %s' % (self.xname(), val, pat))
+                raise ValidationError('%s: "%s" does not match pattern %s' % (self.xname(), val, repr(pat)))
+
+        @classmethod
+        def class_help_string(cls):
+            dcls = cls.dummy_cls
+            doc = dcls.__doc_template__ or StringPattern.__doc_template__
+            return doc % { 'pattern': repr(dcls.pattern) }
 
 
 class StringChoice(String):
+
+    '''Any ``str`` out of ``%(choices)s``.'''
+
     dummy_for = str
     choices = []
 
@@ -827,8 +912,15 @@ class StringChoice(String):
 
         def validate_extra(self, val):
             if val not in self.choices:
-                raise ValidationError('%s: "%s" is not a valid choice out of [ %s ]' % 
-                        (self.xname(), val, ', '.join(['"%s"' % x for x in self.choices])))
+                raise ValidationError(
+                        '%s: "%s" is not a valid choice out of %s' % 
+                        (self.xname(), val, repr(self.choices)))
+
+        @classmethod
+        def class_help_string(cls):
+            dcls = cls.dummy_cls
+            doc = dcls.__doc_template__ or StringChoice.__doc_template__
+            return doc % { 'choices': repr(dcls.choices) }
                 
 
 # this will not always work...
