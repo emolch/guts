@@ -422,6 +422,9 @@ class TBase(object):
             d = prop.default()
             if d is not None:
                 descr.append('*default:* ``%s``' % repr(d))
+
+            if prop.help is not None:
+                descr.append(prop.help)
             
             l.append('   .. py:attribute:: %s' % prop.name)
             l.append('')
@@ -432,7 +435,7 @@ class TBase(object):
 
     @classmethod
     def class_help_string(cls):
-        return cls.__doc__
+        return cls.dummy_cls.__doc_template__
 
     @classmethod
     def class_signature(cls):
@@ -542,7 +545,6 @@ class ObjectMetaClass(type):
             T.instance = T()
 
             cls.__doc_template__ = cls.__doc__
-
             cls.__doc__ = T.class_help_string()
 
             if cls.__doc__ is None:
