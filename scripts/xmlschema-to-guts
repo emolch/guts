@@ -537,6 +537,10 @@ class Extension(Base):
         for attribute in self.attribute_list:
             yield attribute.make_property_definition(patches)
 
+        if self.attribute_group:
+            for x in self.attribute_group.make_property_definitions(patches):
+                yield x
+
 class SimpleContent(Base):
     extension = Extension.T(optional=True)
     restriction = Restriction.T(optional=True)
