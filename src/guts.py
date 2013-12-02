@@ -14,7 +14,7 @@ g_tagname_to_class = {}
 g_xmltagname_to_class = {}
 
 guts_types = [ 'Object', 'SObject', 'String', 'Unicode', 'Int', 'Float', 'Complex', 'Bool', 
-        'Timestamp', 'DateTimestamp', 'StringPattern', 'StringChoice', 'List', 'Tuple', 'Union' ]
+        'Timestamp', 'DateTimestamp', 'StringPattern', 'UnicodePattern', 'StringChoice', 'List', 'Tuple', 'Union' ]
 
 us_to_cc_regex = re.compile(r'([a-z])_([a-z])')
 def us_to_cc(s):
@@ -825,8 +825,10 @@ class Timestamp(Object):
                 val = float(calendar.timegm(tt))
 
             elif isinstance(val, str) or isinstance(val, unicode):
-                val = val.rstrip('Z')
-                val = val.replace('T', ' ')
+                val = val.strip()
+                val = re.sub(r'(Z|\+00(:?00)?)$', '', val)
+                if val[10] == 'T':
+                    val = val.replace('T', ' ', 1)
                 val = str_to_time(val)
             
             elif isinstance(val, int):
@@ -893,6 +895,34 @@ class StringPattern(String):
         def class_help_string(cls):
             dcls = cls.dummy_cls
             doc = dcls.__doc_template__ or StringPattern.__doc_template__
+            return doc % { 'pattern': repr(dcls.pattern) }
+
+
+class UnicodePattern(Unicode):
+
+    '''Any ``unicode`` matching pattern ``%(pattern)s``.'''
+
+    dummy_for = unicode
+    pattern = '.*'
+
+    class __T(TBase):
+        def __init__(self, pattern=None, *args, **kwargs):
+            TBase.__init__(self, *args, **kwargs)
+
+            if pattern is not None:
+                self.pattern = pattern
+            else:
+                self.pattern = self.dummy_cls.pattern
+
+        def validate_extra(self, val):
+            pat = self.pattern
+            if not re.search(pat, val, flags=re.UNICODE):
+                raise ValidationError('%s: "%s" does not match pattern %s' % (self.xname(), val, repr(pat)))
+
+        @classmethod
+        def class_help_string(cls):
+            dcls = cls.dummy_cls
+            doc = dcls.__doc_template__ or UnicodePattern.__doc_template__
             return doc % { 'pattern': repr(dcls.pattern) }
 
 
@@ -1141,22 +1171,22 @@ def _dump_xml(obj, stream, depth=0, xmltagname=None, header=False):
 
         attr_str = ''
         if attrs:
-            attr_str = ' ' + ' '.join( '%s=%s' % (k,quoteattr(v)) for (k,v) in attrs )
+            attr_str = ' ' + ' '.join( '%s=%s' % (k, quoteattr(v)) for (k,v) in attrs )
             
         if not elems:
             stream.write('%s<%s%s />\n' % (indent, xmltagname, attr_str))
         else:
             oneline = len(elems) == 1 and elems[0][0] is None
-            stream.write('%s<%s%s>%s' % (indent, xmltagname, attr_str, ('\n','')[oneline]))
+            stream.write(u'%s<%s%s>%s' % (indent, xmltagname, attr_str, ('\n','')[oneline]))
             for (k,v) in elems:
                 if k is None:
-                    stream.write('%s' % escape(str(v), {'\0': '&#00;'}))
+                    stream.write('%s' % escape(unicode(v), {'\0': '&#00;'}).encode('utf8'))
                 else:
                     _dump_xml(v, stream=stream, depth=depth+1, xmltagname=k)
 
             stream.write('%s</%s>\n' % ((indent,'')[oneline], xmltagname))
     else:
-        stream.write('%s<%s>%s</%s>\n' % (indent, xmltagname, escape(str(obj), {'\0': '&#00;'}), xmltagname))
+        stream.write('%s<%s>%s</%s>\n' % (indent, xmltagname, escape(unicode(obj), {'\0': '&#00;'}).encode('utf8'), xmltagname))
 
 def walk(x, typ=None, path=[]):
     if typ is None or isinstance(x, typ):

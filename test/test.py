@@ -15,7 +15,7 @@ class SamplePat(StringPattern):
 class SampleChoice(StringChoice):
     choices = [ 'a', 'bcd', 'efg' ]
 
-basic_types = (Bool, Int, Float, String, Complex, Timestamp,
+basic_types = (Bool, Int, Float, String, Unicode, Complex, Timestamp,
         SamplePat, SampleChoice)
 
 def tstamp(*args):
@@ -27,6 +27,7 @@ samples[Int] = [ 2**n for n in [1,30] ] #,31,65] ]
 samples[Float] = [ 0., 1., math.pi, float('inf'), float('-inf'), float('nan') ]
 samples[String] = [ '', 'test', 'abc def', '<', '\n', '"', '\'', 
         ''.join(chr(x) for x in range(32,128)) ] # chr(0) and other special chars don't work with xml...
+samples[Unicode] = [ u'aoeu \u00e4 \u0100' ]
 samples[Complex] = [ 1.0+5J, 0.0J, complex('inf'), complex(math.pi,1.0) ]
 samples[Timestamp] = [ 0.0, 
         tstamp(2030,1,1,0,0,0), 
@@ -41,6 +42,7 @@ regularize[Bool] = [ (1, True), (0, False), ('0', False), ('False', False) ]
 regularize[Int] = [ ('1', 1), (1.0, 1), (1.1, 1) ]
 regularize[Float] = [ ('1.0', 1.0), (1, 1.0), ('inf', float('inf')) ]
 regularize[String] = [ (1, '1') ]
+regularize[Unicode] = [ (1, u'1') ]
 regularize[Timestamp] = [ 
         ('2010-01-01 10:20:01', tstamp(2010,1,1,10,20,1)),
         ('2010-01-01T10:20:01', tstamp(2010,1,1,10,20,1)),
