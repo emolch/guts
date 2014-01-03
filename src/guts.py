@@ -431,7 +431,7 @@ class TBase(object):
             if prop.help is not None:
                 descr.append(prop.help)
             
-            l.append('   .. py:attribute:: %s' % prop.name)
+            l.append('    .. py:attribute:: %s' % prop.name)
             l.append('')
             l.append('      %s' % ', '.join(descr))
             l.append('')
