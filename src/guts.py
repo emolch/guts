@@ -186,6 +186,12 @@ def time_to_str(t, format='%Y-%m-%d %H:%M:%S.3FRAC'):
 
 class Defer:
     def __init__(self, classname, *args, **kwargs):
+        global g_iprop
+        if kwargs.get('position', None) is None:
+            kwargs['position'] = g_iprop
+
+        g_iprop += 1
+
         self.classname = classname
         self.args = args
         self.kwargs = kwargs
@@ -198,24 +204,20 @@ class TBase(object):
 
     @classmethod
     def init_propertystuff(cls):
-        if not hasattr(cls, 'properties'):
-            cls.properties = []
-            cls.xmltagname_to_name = {}
-            cls.xmltagname_to_name_multivalued = {}
-            cls.xmltagname_to_class = {}
-            cls.content_property = None
-        else:
-            cls.properties = list(cls.properties)
-            cls.xmltagname_to_name = dict(cls.xmltagname_to_name)  
-            cls.xmltagname_to_name_multivalued = dict(cls.xmltagname_to_name_multivalued) 
-            cls.xmltagname_to_class = dict(cls.xmltagname_to_class) 
-            cls.content_property = cls.content_property
+        cls.properties = []
+        cls.xmltagname_to_name = {}
+        cls.xmltagname_to_name_multivalued = {}
+        cls.xmltagname_to_class = {}
+        cls.content_property = None
 
-
-    def __init__(self, default=None, optional=False, xmlstyle='element', xmltagname=None, help=None):
+    def __init__(self, default=None, optional=False, xmlstyle='element', xmltagname=None, help=None, position=None):
 
         global g_iprop
-        self.iprop = g_iprop
+        if position is not None:
+            self.position = position
+        else:
+            self.position = g_iprop
+
         g_iprop += 1
         self._default = default
         self.optional = optional
@@ -279,12 +281,6 @@ class TBase(object):
     @classmethod
     def add_property(cls, name, prop):
 
-        try:
-            oldprop = cls.remove_property(name)
-            prop.iprop = oldprop.iprop
-        except ValueError:
-            pass
-
         prop.instance = prop
         prop.name = name 
 
@@ -300,7 +296,7 @@ class TBase(object):
 
         cls.properties.append(prop)
 
-        cls.properties.sort(key=lambda x: x.iprop)
+        cls.properties.sort(key=lambda x: x.position)
 
         if prop.xmlstyle == 'content':
             cls.content_property = prop

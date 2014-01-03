@@ -135,6 +135,35 @@ class TestGuts(unittest.TestCase):
 
         a = A(a=A(a=A()))
 
+    def testOrder(self):
+        class A(Object):
+            a = Int.T(default=1)
+            b = Int.T(default=2)
+
+        class B(A):
+            a = Int.T(default=3, position=A.a.position)
+            c = Int.T(default=4)
+
+        b = B()
+        names = [ k for (k,v) in b.T.inamevals(b) ]
+        assert names == ['a', 'b', 'c']
+
+    def testOrderDeferred(self):
+        class A(Object):
+            a = Defer('B.T')
+            b = Int.T(default=0)
+
+
+        class B(Object):
+            x = Int.T(default=1)
+
+        a = A(a=B())
+        names = [ k for (k,v) in a.T.inamevals(a) ]
+
+        assert names == ['a', 'b']
+
+        
+
     def testContentStyleXML(self):
 
         class Duration(Object):
