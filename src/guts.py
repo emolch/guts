@@ -509,6 +509,9 @@ class ObjectMetaClass(type):
             for k in dir(cls):
                 prop = getattr(cls, k)
 
+                if k.endswith('__'):
+                    k = k[:-2]
+
                 if isinstance(prop, TBase):
                     if prop.deferred():
                         for defer in prop.deferred():
