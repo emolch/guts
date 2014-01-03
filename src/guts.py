@@ -192,6 +192,7 @@ class Defer:
 
 class TBase(object):
 
+    strict = False
     multivalued = False
     forced_regularize = False
 
@@ -363,16 +364,20 @@ class TBase(object):
     def validate(self, val, regularize=False, depth=-1):
         if self.optional and val is None:
             return val
+
+        is_derived = isinstance(val, self.cls)
+        is_exact = type(val) == self.cls
+        not_ok = not self.strict and not is_derived or self.strict and not is_exact
         
-        if not isinstance(val, self.cls) or self.forced_regularize:
+        if not_ok or self.forced_regularize:
             if regularize:
                 try:
                     val = self.regularize_extra(val)
                 except (RegularizationError, ValueError):
                     raise ValidationError('%s: could not convert "%s" to type %s' % (self.xname(), val, self.cls.__name__))
             else:
-                if not isinstance(val, self.cls):
-                    raise ValidationError('%s: "%s" is not of type %s' % (self.xname(), val, self.cls.__name__))
+                if not_ok:
+                    raise ValidationError('%s: "%s" (type: %s) is not of type %s' % (self.xname(), val, type(val), self.cls.__name__))
 
         self.validate_extra(val)
 
@@ -642,6 +647,7 @@ class Int(Object):
     dummy_for = int
 
     class __T(TBase):
+        strict = True
 
         def to_save_xml(self, value):
             return repr(value)
@@ -650,6 +656,7 @@ class Float(Object):
     dummy_for = float
 
     class __T(TBase):
+        strict = True
 
         def to_save_xml(self, value):
             return repr(value)
@@ -658,6 +665,7 @@ class Complex(Object):
     dummy_for = complex
     
     class __T(TBase):
+        strict = True
 
         def regularize_extra(self, val):
             if isinstance(val, basestring):
@@ -679,6 +687,7 @@ class Bool(Object):
     dummy_for = bool
 
     class __T(TBase):
+        strict = True
 
         def regularize_extra(self, val):
             if isinstance(val, basestring):
