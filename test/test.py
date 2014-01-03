@@ -28,7 +28,7 @@ samples[Float] = [ 0., 1., math.pi, float('inf'), float('-inf'), float('nan') ]
 samples[String] = [ '', 'test', 'abc def', '<', '\n', '"', '\'', 
         ''.join(chr(x) for x in range(32,128)) ] # chr(0) and other special chars don't work with xml...
 samples[Unicode] = [ u'aoeu \u00e4 \u0100' ]
-samples[Complex] = [ 1.0+5J, 0.0J, complex('inf'), complex(math.pi,1.0) ]
+samples[Complex] = [ 1.0+5J, 0.0J, complex(math.pi,1.0) ]
 samples[Timestamp] = [ 0.0, 
         tstamp(2030,1,1,0,0,0), 
         tstamp(1960,1,1,0,0,0),
@@ -67,6 +67,9 @@ class TestGuts(unittest.TestCase):
                 gotit = True
 
             assert gotit, 'expected to get a %s exception' % exc
+
+        def assertIsNone(self, value):
+            assert value is None, 'expected None but got %s' % value
 
     def assertEqualNanAware(self, a, b):
         if isinstance(a, float) and isinstance(b, float) and math.isnan(a) and math.isnan(b):
@@ -183,10 +186,23 @@ class TestGuts(unittest.TestCase):
             '''A description'''
 
             a = Int.T(default=0, help='the a property')
+
+        class B(A):
+            '''B description'''
+
             b = Float.T(default=0, help='the b property')
             c = List.T(Int.T(), help='the c')
 
-        print help(a)
+        self.assertEqual(B.__doc__, '''B description
+
+    .. py:attribute:: b
+
+      ``float``, *default:* ``0``, the b property
+
+    .. py:attribute:: c
+
+      ``list`` of ``int`` objects, *default:* ``[]``, the c
+''')
 
     def testContentStyleXML(self):
 
@@ -197,11 +213,11 @@ class TestGuts(unittest.TestCase):
 
             xmltagname = 'duration'
 
-        s = '<duration unit="s"><uncertainty>0.1</uncertainty>10.5</duration>'
+        s = '<duration unit="s"><uncertainty>1.0</uncertainty>10.5</duration>'
         dur = load_xml_string(s)
         self.assertEqual(dur.value, float('10.5'))
         self.assertEqual(dur.unit, 's')
-        self.assertEqual(dur.uncertainty, float('0.1'))
+        self.assertEqual(dur.uncertainty, float('1.0'))
         self.assertEqual(re.sub(r'\n\s*', '', dur.dump_xml()), s)
 
     def testPO(self):
