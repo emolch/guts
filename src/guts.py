@@ -460,6 +460,15 @@ class TBase(object):
     def help(cls):
         return cls.props_help_string()
 
+    @classmethod
+    def update_doc_string(cls):
+        cls.__doc__ = T.class_help_string()
+
+        if cls.__doc__ is None:
+            cls.__doc__ = 'Undocumented.'
+
+        cls.__doc__ += '\n' + T.props_help_string()
+
 
 class ObjectMetaClass(type):
     def __new__(meta, classname, bases, class_dict):
@@ -549,12 +558,8 @@ class ObjectMetaClass(type):
             T.instance = T()
 
             cls.__doc_template__ = cls.__doc__
-            cls.__doc__ = T.class_help_string()
 
-            if cls.__doc__ is None:
-                cls.__doc__ = 'Undocumented.'
-
-            cls.__doc__ += '\n' + T.props_help_string()
+            cls.update_doc_string()
 
         return cls
 
