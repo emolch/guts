@@ -50,7 +50,23 @@ regularize[Timestamp] = [
         ('2030-12-12 00:00:10.11111', tstamp(2030,12,12,0,0,10)+0.11111)
 ]
 
+
+from contextlib import contextmanager
+
 class TestGuts(unittest.TestCase):
+
+    if sys.version_info < (2, 7):
+
+        @contextmanager
+        def assertRaises(self, exc):
+
+            gotit = False
+            try:
+                yield None
+            except exc:
+                gotit = True
+
+            assert gotit, 'expected to get a %s exception' % exc
 
     def assertEqualNanAware(self, a, b):
         if isinstance(a, float) and isinstance(b, float) and math.isnan(a) and math.isnan(b):
@@ -162,7 +178,15 @@ class TestGuts(unittest.TestCase):
 
         assert names == ['a', 'b']
 
-        
+    def testDocs(self):
+        class A(Object):
+            '''A description'''
+
+            a = Int.T(default=0, help='the a property')
+            b = Float.T(default=0, help='the b property')
+            c = List.T(Int.T(), help='the c')
+
+        print help(a)
 
     def testContentStyleXML(self):
 
