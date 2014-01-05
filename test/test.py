@@ -87,32 +87,66 @@ class TestGuts(unittest.TestCase):
         with self.assertRaises(ValidationError):
             x.validate()
 
+    def testAny(self):
+        class X(Object):
+            y = Int.T(default=1)
+            
+        class A(Object):
+            x = Any.T()
+            l = List.T(Any.T())
+
+        a1 = A(x=X(y=33))
+        a1.validate()
+        a1c = load_string(a1.dump())
+        self.assertEqual(a1c.x.y, 33)
+
+        a2 = A(x=22, l=['a', 44, X(y=22)])
+        a2.validate()
+        a2c = load_string(a2.dump())
+        self.assertEqual(a2c.x, 22)
+        self.assertEqual(a2c.l[:2], ['a', 44])
+        self.assertEqual(a2c.l[2].y, 22)
+
+
+
     def testUnion(self):
 
         class X1(Object):
+            xmltagname = 'root'
             m = Union.T(members=[Int.T(), StringChoice.T(['small', 'large'])])
 
         class U(Union):
             members = [ Int.T(), StringChoice.T(['small', 'large']) ]
     
         class X2(Object):
+            xmltagname = 'root'
             m = U.T()
 
-        X = X2
-        x1 = X(m='1')
-        with self.assertRaises(ValidationError):
-            x1.validate()
+        for X in [X1, X2]:
+            X = X1
+            x1 = X(m='1')
+            with self.assertRaises(ValidationError):
+                x1.validate()
 
-        x1.validate(regularize=True)
-        self.assertEqual(x1.m, 1)
+            x1.validate(regularize=True)
+            self.assertEqual(x1.m, 1)
 
-        x2 = X(m='small')
-        x2.validate()
-        x3 = X(m='fail!')
-        with self.assertRaises(ValidationError):
-            x3.validate()
-        with self.assertRaises(ValidationError):
-            x3.validate(regularize=True)
+            x2 = X(m='small')
+            x2.validate()
+            x3 = X(m='fail!')
+            with self.assertRaises(ValidationError):
+                x3.validate()
+            with self.assertRaises(ValidationError):
+                x3.validate(regularize=True)
+
+            for x in [x1, x2]:
+                y = load_string(x.dump())
+                self.assertEqual(x.m, y.m)
+
+            for x in [x1, x2]:
+                y = load_xml_string(x.dump_xml())
+                self.assertEqual(x.m, y.m)
+
 
     def testTooMany(self):
 

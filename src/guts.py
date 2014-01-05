@@ -13,8 +13,8 @@ g_deferred_content = {}
 g_tagname_to_class = {}
 g_xmltagname_to_class = {}
 
-guts_types = [ 'Object', 'SObject', 'String', 'Unicode', 'Int', 'Float', 'Complex', 'Bool', 
-        'Timestamp', 'DateTimestamp', 'StringPattern', 'UnicodePattern', 'StringChoice', 'List', 'Tuple', 'Union' ]
+guts_types = ['Object', 'SObject', 'String', 'Unicode', 'Int', 'Float', 'Complex', 'Bool', 
+        'Timestamp', 'DateTimestamp', 'StringPattern', 'UnicodePattern', 'StringChoice', 'List', 'Tuple', 'Union', 'Any']
 
 us_to_cc_regex = re.compile(r'([a-z])_([a-z])')
 def us_to_cc(s):
@@ -649,8 +649,10 @@ class SObject(Object):
 
 
 class Any(Object):
-    pass
 
+    class __T(TBase):
+        def validate(self, val, regularize=False, depth=-1):
+            return val
 
 class Int(Object):
     dummy_for = int
@@ -984,6 +986,7 @@ class StringChoice(String):
 # this will not always work...
 class Union(Object):
     members = []
+    dummy_for = str
 
     class __T(TBase):
         def __init__(self, members=None, *args, **kwargs):
