@@ -148,6 +148,17 @@ class TestGuts(unittest.TestCase):
 
         a = A(p=[B(p=[A()])], q=[B(),B()])
 
+    def testOptionalList(self):
+        class A(Object):
+            l1 = List.T(Int.T())
+            l2 = List.T(Int.T(), optional=True)
+            l3 = List.T(Int.T(), default=[1, 2, 3])
+
+        a = A()
+        self.assertEqual(a.l1, [])
+        self.assertIsNone(a.l2)
+        self.assertEqual(a.l3, [1, 2, 3])
+
     def testSelfDeferred(self):
         class A(Object):
             a = Defer('A.T', optional=True)

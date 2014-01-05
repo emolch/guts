@@ -233,6 +233,9 @@ class TBase(object):
         else:
             return self._default
 
+    def has_default(self):
+        return self._default is not None
+
     def xname(self):
         if self.name is not None:
             return self.name
@@ -593,7 +596,7 @@ class Object(object):
             if k in kwargs:
                 setattr(self, k, kwargs.pop(k))
             else:
-                if not prop.optional and prop.default() is None:
+                if not prop.optional and not prop.has_default():
                     raise ArgumentError('Missing argument to %s: %s' % (self.T.tagname, prop.name))
                 else:
                     setattr(self, k, prop.default())
@@ -725,8 +728,13 @@ class List(Object):
         def default(self):
             if self._default is not None:
                 return self._default
+            if self.optional:
+                return None
             else:
                 return []
+
+        def has_default(self):
+            return True
 
         def validate(self, val, regularize, depth):
             return TBase.validate(self, val, regularize, depth+1)
@@ -786,6 +794,9 @@ class Tuple(Object):
                 return None
             else:
                 return tuple( self.content_t.default() for x in xrange(self.n) )
+
+        def has_default(self):
+            return True
 
         def validate(self, val, regularize, depth):
             return TBase.validate(self, val, regularize, depth+1)
