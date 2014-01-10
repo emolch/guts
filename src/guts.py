@@ -1,6 +1,11 @@
 '''Lightweight declarative YAML and XML data binding for Python.'''
 
 import yaml
+try:
+    from yaml import CSafeLoader as SafeLoader, CSafeDumper as SafeDumper
+except:
+    from yaml import SafeLoader, SafeDumper
+
 import datetime, calendar, re, sys, time, math, types
 from itertools import izip
 from cStringIO import StringIO
@@ -1006,7 +1011,7 @@ class Union(Object):
 
             raise e
 
-def _dump(object, stream, header=False, _dump_function=yaml.safe_dump):
+def _dump(object, stream, header=False, _dump_function=yaml.dump):
 
     if header:
         stream.write('%YAML 1.1\n')
@@ -1015,19 +1020,19 @@ def _dump(object, stream, header=False, _dump_function=yaml.safe_dump):
             stream.write(banner)
             stream.write('\n')
 
-    _dump_function(object, stream=stream, explicit_start=True)
+    _dump_function(object, stream=stream, explicit_start=True, Dumper=SafeDumper)
 
 def _dump_all(object, stream, header=True):
-    _dump(object, stream=stream, header=header, _dump_function=yaml.safe_dump_all)
+    _dump(object, stream=stream, header=header, _dump_function=yaml.dump_all)
 
 def _load(stream):
-    return yaml.safe_load(stream=stream)
+    return yaml.load(stream=stream, Loader=SafeLoader)
 
 def _load_all(stream):
-    return list(yaml.safe_load_all(stream=stream))
+    return list(yaml.load_all(stream=stream, Loader=SafeLoader))
 
 def _iload_all(stream):
-    return yaml.safe_load_all(stream=stream)
+    return yaml.load_all(stream=stream, Loader=SafeLoader)
 
 def multi_representer(dumper, data):
     node = dumper.represent_mapping('!'+data.T.tagname, 
@@ -1043,8 +1048,8 @@ def multi_constructor(loader, tag_suffix, node):
     o.validate(regularize=True, depth=1)
     return o
 
-yaml.add_multi_representer(Object, multi_representer, Dumper=yaml.SafeDumper)
-yaml.add_multi_constructor('!', multi_constructor, Loader=yaml.SafeLoader)
+yaml.add_multi_representer(Object, multi_representer, Dumper=SafeDumper)
+yaml.add_multi_constructor('!', multi_constructor, Loader=SafeLoader)
 
 
 class Constructor(object):

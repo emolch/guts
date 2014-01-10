@@ -265,6 +265,27 @@ class TestGuts(unittest.TestCase):
         self.assertEqual(dur.uncertainty, float('1.0'))
         self.assertEqual(re.sub(r'\n\s*', '', dur.dump_xml()), s)
 
+    def testArray(self):
+        from guts_array import Array
+        import numpy as num
+
+        for serialize_as in ('base64', 'table'):
+            class A(Object):
+                xmltagname = 'aroot'
+                arr = Array.T(
+                    shape=(None,),
+                    dtype=num.int, 
+                    serialize_as=serialize_as,
+                    serialize_dtype='>i8')
+
+            a = A(arr=num.arange(1000, dtype=num.int))        
+
+            b = load_string(a.dump())
+            self.assertTrue(num.all(a.arr == b.arr))
+
+            b = load_xml_string(a.dump_xml())
+            self.assertTrue(num.all(a.arr == b.arr))
+
     def testPO(self):
         class SKU(StringPattern):
             pattern = '\\d{3}-[A-Z]{2}'
