@@ -310,22 +310,48 @@ class TestGuts(unittest.TestCase):
         from guts_array import Array
         import numpy as num
 
-        for serialize_as in ('base64', 'table'):
-            class A(Object):
-                xmltagname = 'aroot'
-                arr = Array.T(
-                    shape=(None,),
-                    dtype=num.int, 
-                    serialize_as=serialize_as,
-                    serialize_dtype='>i8')
+        shapes = [ (None,), (1,), (10,), (1000,) ]
+        for shape in shapes:
+            for serialize_as in ('base64', 'table'):
+                class A(Object):
+                    xmltagname = 'aroot'
+                    arr = Array.T(
+                        shape=shape,
+                        dtype=num.int, 
+                        serialize_as=serialize_as,
+                        serialize_dtype='>i8')
 
-            a = A(arr=num.arange(1000, dtype=num.int))        
+                n = shape[0] or 1000
+                a = A(arr=num.arange(n, dtype=num.int))        
 
-            b = load_string(a.dump())
-            self.assertTrue(num.all(a.arr == b.arr))
+                b = load_string(a.dump())
+                self.assertTrue(num.all(a.arr == b.arr))
 
-            b = load_xml_string(a.dump_xml())
-            self.assertTrue(num.all(a.arr == b.arr))
+                b = load_xml_string(a.dump_xml())
+                self.assertTrue(num.all(a.arr == b.arr))
+
+                if shape[0] is not None:
+                    with self.assertRaises(ValidationError):
+                        a = A(arr=num.arange(n+10, dtype=num.int))
+                        a.validate()
+                        
+        for s0 in [ None, 2, 10 ]:
+            for s1 in [ None, 2, 10 ]:
+                class A(Object):
+                    xmltagname = 'aroot'
+                    arr = Array.T(
+                        shape=(s0, s1),
+                        dtype=num.int)
+
+                n0 = s0 or 100
+                n1 = s1 or 100
+                a = A(arr=num.arange(n0*n1, dtype=num.int).reshape((n0,n1)))
+                b = load_string(a.dump())
+                print b.arr.shape
+                self.assertTrue(num.all(a.arr == b.arr))
+
+                b = load_xml_string(a.dump_xml())
+                self.assertTrue(num.all(a.arr == b.arr))
 
     def testPO(self):
         class SKU(StringPattern):
