@@ -1068,7 +1068,7 @@ class Constructor(object):
         name = name.split()[-1]
         if self.stack and self.stack[-1][1] is not None:
             cls = self.stack[-1][1].T.xmltagname_to_class.get(name, None)
-            if cls is not None and not issubclass(cls, Object):
+            if cls is not None and (not issubclass(cls, Object) or issubclass(cls, SObject)):
                 cls = None
         else:
             cls = g_xmltagname_to_class.get(name, None)

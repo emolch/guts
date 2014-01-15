@@ -306,6 +306,36 @@ class TestGuts(unittest.TestCase):
         self.assertEqual(dur.uncertainty, float('1.0'))
         self.assertEqual(re.sub(r'\n\s*', '', dur.dump_xml()), s)
 
+    def testSObject(self):
+
+        class DotName(SObject):
+            network = String.T()
+            station = String.T()
+
+            def __init__(self, s=None, **kwargs):
+                if s is not None:
+                    network, station = s.split('.')
+                    kwargs = dict(network=network, station=station)
+
+                SObject.__init__(self, **kwargs)
+
+            def __str__(self):
+                return '.'.join((self.network, self.station))
+
+        class X(Object):
+            xmltagname = 'root'
+            dn = DotName.T()
+
+        x = X(dn=DotName(network='abc', station='def'))
+        self.assertEqual(x.dn.network, 'abc')
+        self.assertEqual(x.dn.station, 'def')
+        x = load_string(dump(x))
+        self.assertEqual(x.dn.network, 'abc')
+        self.assertEqual(x.dn.station, 'def')
+        x = load_xml_string(dump_xml(x))
+        self.assertEqual(x.dn.network, 'abc')
+        self.assertEqual(x.dn.station, 'def')
+
     def testArray(self):
         from guts_array import Array
         import numpy as num
