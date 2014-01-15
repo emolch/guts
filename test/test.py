@@ -77,7 +77,7 @@ class TestGuts(unittest.TestCase):
         
         self.assertEqual(a,b)
 
-    def testChoice(self):
+    def testStringChoice(self):
         class X(Object):
             m = StringChoice.T(['a', 'b'])
 
@@ -107,7 +107,32 @@ class TestGuts(unittest.TestCase):
         self.assertEqual(a2c.l[:2], ['a', 44])
         self.assertEqual(a2c.l[2].y, 22)
 
+        a3 = A(x=X(y='10'))
+        with self.assertRaises(ValidationError):
+            a3.validate()
 
+        a3.regularize()
+        assert a3.x.y == 10
+
+    def testAnyObject(self):
+        class Base(Object):
+            pass
+
+        class A(Base):
+            y = Int.T(default=1)
+
+        class B(Base):
+            x = Float.T(default=1.0)
+
+        class C(Object):
+            c = Base.T()
+
+        c = C(c=A(y='1'))
+        with self.assertRaises(ValidationError):
+            c.validate()
+
+        c.regularize()
+        assert c.c.y == 1
 
     def testUnion(self):
 
@@ -147,6 +172,22 @@ class TestGuts(unittest.TestCase):
                 y = load_xml_string(x.dump_xml())
                 self.assertEqual(x.m, y.m)
 
+    def testChoice(self):
+        def A(Object):
+            x = Int.T(default=1)
+        
+        def B(Object):
+            y = Int.T(default=2)
+
+        def AB(Choice):
+            choices = [A.T(), B.T()]
+
+        def C1(Object):
+            ab1 = Choice.T(choices=[A.T(), B.T()], xmltagname=[('a', A.T), ('b', B.T)])
+            ab2 = AB.T(xmltagname=[('a', A.T), ('b', B.T)])
+    
+        C(ab1=A(), ab2=B())
+        print c
 
     def testTooMany(self):
 

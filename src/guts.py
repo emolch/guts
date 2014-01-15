@@ -657,6 +657,9 @@ class Any(Object):
 
     class __T(TBase):
         def validate(self, val, regularize=False, depth=-1):
+            if isinstance(val, Object):
+                val.validate(regularize, depth)
+
             return val
 
 class Int(Object):
