@@ -124,12 +124,22 @@ class TestGuts(unittest.TestCase):
         class B(Base):
             x = Float.T(default=1.0)
 
-        class C(Object):
-            c = Base.T()
 
-        c = C(c=A(y='1'))
-        with self.assertRaises(ValidationError):
+        class C(Object):
+            c = Base.T(optional=True)
+
+        ca = C(c=A())
+        cb = C(c=B())
+        c_err = C(c='abc')
+        cc_err = C(c=C())
+        ca_err = C(c=A(y='1'))
+
+        for c in (ca, cb):
             c.validate()
+
+        for c in (c_err, cc_err, ca_err):
+            with self.assertRaises(ValidationError):
+                c.validate()
 
         c.regularize()
         assert c.c.y == 1
@@ -173,21 +183,38 @@ class TestGuts(unittest.TestCase):
                 self.assertEqual(x.m, y.m)
 
     def testChoice(self):
-        def A(Object):
+        class A(Object):
             x = Int.T(default=1)
-        
-        def B(Object):
+
+        class B(Object):
             y = Int.T(default=2)
 
-        def AB(Choice):
+        class AB(Choice):
             choices = [A.T(), B.T()]
 
-        def C1(Object):
-            ab1 = Choice.T(choices=[A.T(), B.T()], xmltagname=[('a', A.T), ('b', B.T)])
-            ab2 = AB.T(xmltagname=[('a', A.T), ('b', B.T)])
+        class C1(Object):
+            ab1 = Choice.T(choices=[A.T(xmltagname='a'), B.T(xmltagname='b')]) #, xmltagname=[('a', A.T), ('b', B.T)])
+            ab2 = AB.T() #xmltagname=[('a', A.T), ('b', B.T)])
     
-        C(ab1=A(), ab2=B())
-        print c
+        c = C1(ab1=A(), ab2=B())
+        c.validate()
+
+        print c.dump_xml()
+
+        c2 = load_string(dump(c))
+        self.assertEqual(type(c2), C1)
+        self.assertEqual(type(c2.ab1), A)
+        self.assertEqual(type(c2.ab2), B)
+
+        class D(Object):
+            z = Float.T(default=1)
+
+        c1_err = C1(ab1=D(), ab2=A())
+        c2_err = C1(ab1=A(), ab2=D())
+
+        for c in (c1_err, c2_err):
+            with self.assertRaises(ValidationError):
+                c.validate()
 
     def testTooMany(self):
 
@@ -230,6 +257,7 @@ class TestGuts(unittest.TestCase):
             l3 = List.T(Int.T(), default=[1, 2, 3])
 
         a = A()
+        a.validate()
         self.assertEqual(a.l1, [])
         self.assertIsNone(a.l2)
         self.assertEqual(a.l3, [1, 2, 3])
