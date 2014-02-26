@@ -125,14 +125,23 @@ class TestGuts(unittest.TestCase):
             x = Float.T(default=1.0)
 
         class C(Object):
-            c = Base.T()
+            c = Base.T(optional=True)
 
-        c = C(c=A(y='1'))
-        with self.assertRaises(ValidationError):
+        ca = C(c=A())
+        cb = C(c=B())
+        c_err = C(c='abc')
+        cc_err = C(c=C())
+        ca_err = C(c=A(y='1'))
+
+        for c in (ca, cb):
             c.validate()
 
-        c.regularize()
-        assert c.c.y == 1
+        for c in (c_err, cc_err, ca_err):
+            with self.assertRaises(ValidationError):
+                c.validate()
+
+        ca_err.regularize()
+        assert ca_err.c.y == 1
 
     def testUnion(self):
 
