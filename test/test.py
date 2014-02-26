@@ -387,7 +387,6 @@ class TestGuts(unittest.TestCase):
                 n1 = s1 or 100
                 a = A(arr=num.arange(n0*n1, dtype=num.int).reshape((n0,n1)))
                 b = load_string(a.dump())
-                print b.arr.shape
                 self.assertTrue(num.all(a.arr == b.arr))
 
                 b = load_xml_string(a.dump_xml())

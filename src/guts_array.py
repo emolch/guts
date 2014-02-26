@@ -33,7 +33,7 @@ class Array(Object):
                     ndim = len(self.shape)
 
                 if self.serialize_as == 'table':
-                    val = num.loadtxt(StringIO(val), dtype=self.dtype, ndmin=ndim)
+                    val = num.loadtxt(StringIO(str(val)), dtype=self.dtype, ndmin=ndim)
                 elif self.serialize_as == 'base64':
                     data = b64decode(val)
                     val = num.fromstring(data, dtype=self.serialize_dtype).astype(self.dtype)
