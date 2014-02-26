@@ -182,21 +182,39 @@ class TestGuts(unittest.TestCase):
                 self.assertEqual(x.m, y.m)
 
     def testChoice(self):
-        def A(Object):
+        class A(Object):
             x = Int.T(default=1)
-        
-        def B(Object):
+
+        class B(Object):
             y = Int.T(default=2)
 
-        def AB(Choice):
-            choices = [A.T(), B.T()]
+        class OhOh(Object):
+            z = Float.T(default=4.0)
 
-        def C1(Object):
-            ab1 = Choice.T(choices=[A.T(), B.T()], xmltagname=[('a', A.T), ('b', B.T)])
-            ab2 = AB.T(xmltagname=[('a', A.T), ('b', B.T)])
+        class AB(Choice):
+            choices = [A.T(xmltagname='a'), B.T(xmltagname='b')]
+
+        class C1(Object):
+            xmltagname='root1'
+            ab = Choice.T(choices=[A.T(xmltagname='a'), B.T(xmltagname='b')])
+
+        class C2(Object):
+            xmltagname='root2'
+            ab = AB.T()
     
-        C(ab1=A(), ab2=B())
-        print c
+        for C in (C1, C2):
+            for good in (A(), B()):
+                c = C(ab=good)
+                c.validate()
+                for dumpx, loadx in ((dump, load_string), (dump_xml, load_xml_string)):
+                    c2 = loadx(dumpx(c))
+                    self.assertEqual(type(c2), C)
+                    self.assertEqual(type(c2.ab), type(good))
+
+            for bad in (OhOh(), 5.0):
+                c = C(ab=bad)
+                with self.assertRaises(ValidationError):
+                    c.validate()
 
     def testTooMany(self):
 

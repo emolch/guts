@@ -19,7 +19,7 @@ g_tagname_to_class = {}
 g_xmltagname_to_class = {}
 
 guts_types = ['Object', 'SObject', 'String', 'Unicode', 'Int', 'Float', 'Complex', 'Bool', 
-        'Timestamp', 'DateTimestamp', 'StringPattern', 'UnicodePattern', 'StringChoice', 'List', 'Tuple', 'Union', 'Any']
+        'Timestamp', 'DateTimestamp', 'StringPattern', 'UnicodePattern', 'StringChoice', 'List', 'Tuple', 'Union', 'Choice', 'Any']
 
 us_to_cc_regex = re.compile(r'([a-z])_([a-z])')
 def us_to_cc(s):
@@ -205,7 +205,6 @@ class TBase(object):
 
     strict = False
     multivalued = False
-    forced_regularize = False
 
     @classmethod
     def init_propertystuff(cls):
@@ -292,7 +291,12 @@ class TBase(object):
         prop.instance = prop
         prop.name = name 
 
-        if not prop.multivalued:
+        if isinstance(prop, Choice.T):
+            for tc in prop.choices:
+                tc.effective_xmltagname = tc.get_xmltagname()
+                cls.xmltagname_to_class[tc.effective_xmltagname] = tc.cls
+                cls.xmltagname_to_name[tc.effective_xmltagname] = prop.name
+        elif not prop.multivalued:
             prop.effective_xmltagname = prop.get_xmltagname()
             cls.xmltagname_to_class[prop.effective_xmltagname] = prop.cls
             cls.xmltagname_to_name[prop.effective_xmltagname] = prop.name
@@ -373,20 +377,23 @@ class TBase(object):
         is_exact = type(val) == self.cls
         not_ok = not self.strict and not is_derived or self.strict and not is_exact
         
-        if not_ok or self.forced_regularize:
+        if not_ok:
             if regularize:
                 try:
                     val = self.regularize_extra(val)
                 except (RegularizationError, ValueError):
                     raise ValidationError('%s: could not convert "%s" to type %s' % (self.xname(), val, self.cls.__name__))
             else:
-                if not_ok:
-                    raise ValidationError('%s: "%s" (type: %s) is not of type %s' % (self.xname(), val, type(val), self.cls.__name__))
+                raise ValidationError('%s: "%s" (type: %s) is not of type %s' % (self.xname(), val, type(val), self.cls.__name__))
 
-        self.validate_extra(val)
+        validator = self
+        if type(val) != self.cls and isinstance(val, self.cls):
+            validator = val.T.instance
+
+        validator.validate_extra(val)
 
         if depth != 0:
-            val = self.validate_children(val, regularize, depth)
+            val = validator.validate_children(val, regularize, depth)
 
         return val
 
@@ -409,6 +416,13 @@ class TBase(object):
 
     def to_save_xml(self, val):
         return self.to_save(val)
+
+    def extend_xmlelements(self, elems, v):
+        if self.multivalued:
+            for x in v:
+                elems.append((self.content_t.effective_xmltagname, x))
+        else:
+            elems.append((self.effective_xmltagname, v))
 
     def deferred(self):
         return []
@@ -1014,6 +1028,64 @@ class Union(Object):
 
             raise e
 
+
+class Choice(Object):
+    choices = []
+
+    class __T(TBase):
+        def __init__(self, choices=None, *args, **kwargs):
+            TBase.__init__(self, *args, **kwargs)
+            if choices is not None:
+                self.choices = choices
+            else:
+                self.choices = self.dummy_cls.choices
+
+            self.cls_to_xmltagname = dict((t.cls, t.get_xmltagname()) for t in self.choices)
+
+        def validate(self, val, regularize=False, depth=-1):
+            if self.optional and val is None:
+                return val
+
+            t = None
+            for  tc in self.choices:
+                is_derived = isinstance(val, tc.cls)
+                is_exact = type(val) == tc.cls
+                if not (not tc.strict and not is_derived or tc.strict and not is_exact):
+                    t = tc
+                    break
+            
+            if t is None: 
+                if regularize:
+                    ok = False
+                    for tc in self.choices:
+                        try:
+                            val = tc.regularize_extra(val)
+                            ok = True
+                            t = tc
+                            break
+                        except (RegularizationError, ValueError), e:
+                            pass
+
+                    if not ok: 
+                        raise ValidationError('%s: could not convert "%s" to any type out of (%s)' % (self.xname(), val, ','.join(x.cls.__name__ for x in self.choices)))
+                else:
+                    raise ValidationError('%s: "%s" (type: %s) is not of any type out of (%s)' % (self.xname(), val, type(val), ','.join(x.cls.__name__ for x in self.choices)))
+
+            validator = t
+            if type(val) != t.cls and isinstance(val, t.cls):
+                validator = val.T.instance
+
+            validator.validate_extra(val)
+
+            if depth != 0:
+                val = validator.validate_children(val, regularize, depth)
+
+            return val
+        
+        def extend_xmlelements(self, elems, v):
+            elems.append((self.cls_to_xmltagname[type(v)], v))
+
+
 def _dump(object, stream, header=False, _dump_function=yaml.dump):
 
     if header:
@@ -1199,11 +1271,7 @@ def _dump_xml(obj, stream, depth=0, xmltagname=None, header=False):
                 elems.append((None, v))
 
             else:
-                if prop.multivalued:
-                    for x in v:
-                        elems.append((prop.content_t.effective_xmltagname, x))
-                else:
-                    elems.append((prop.effective_xmltagname, v))
+                prop.extend_xmlelements(elems, v)
 
 
         attr_str = ''
