@@ -239,6 +239,7 @@ class TestGuts(unittest.TestCase):
             l3 = List.T(Int.T(), default=[1, 2, 3])
 
         a = A()
+        a.validate()
         self.assertEqual(a.l1, [])
         self.assertIsNone(a.l2)
         self.assertEqual(a.l3, [1, 2, 3])
