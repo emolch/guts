@@ -701,17 +701,18 @@ class Complex(Object):
         strict = True
 
         def regularize_extra(self, val):
-            if isinstance(val, basestring):
-                val = complex(val)
 
-            elif isinstance(val, list) or isinstance(val, tuple):
+            if isinstance(val, list) or isinstance(val, tuple):
                 assert len(val) == 2
                 val = complex(*val)
+
+            elif not isinstance(val, complex):
+                val = complex(val)
 
             return val
 
         def to_save(self, value):
-            return (value.real, value.imag)
+            return repr(value)
 
         def to_save_xml(self, value):
             return repr(value)
