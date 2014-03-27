@@ -22,7 +22,7 @@ class Array(Object):
             TBase.__init__(self, *args, **kwargs)
             self.shape = shape
             self.dtype = dtype
-            assert serialize_as in ('table', 'base64')
+            assert serialize_as in ('table', 'base64', 'list')
             self.serialize_as = serialize_as
             self.serialize_dtype = serialize_dtype
 
@@ -64,6 +64,11 @@ class Array(Object):
             elif self.serialize_as == 'base64':
                 data = val.astype(self.serialize_dtype).tostring()
                 return literal(data.encode('base64'))
+            elif self.serialize_as == 'list':
+                if self.dtype == num.complex:
+                    return [ repr(x) for x in val ]
+                else:
+                    return val.tolist()
 
             
 
