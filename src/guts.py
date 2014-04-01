@@ -19,7 +19,7 @@ g_tagname_to_class = {}
 g_xmltagname_to_class = {}
 
 guts_types = ['Object', 'SObject', 'String', 'Unicode', 'Int', 'Float', 'Complex', 'Bool', 
-        'Timestamp', 'DateTimestamp', 'StringPattern', 'UnicodePattern', 'StringChoice', 'List', 'Tuple', 'Union', 'Choice', 'Any']
+        'Timestamp', 'DateTimestamp', 'StringPattern', 'UnicodePattern', 'StringChoice', 'List', 'Dict', 'Tuple', 'Union', 'Choice', 'Any']
 
 us_to_cc_regex = re.compile(r'([a-z])_([a-z])')
 def us_to_cc(s):
@@ -737,6 +737,60 @@ class Unicode(Object):
     dummy_for = unicode
 
 guts_plain_dummy_types = (String, Unicode, Int, Float, Complex, Bool)
+
+class Dict(Object):
+    dummy_for = dict
+
+    class __T(TBase):
+        multivalued = True
+
+        def __init__(self, content_t=Any.T(), *args, **kwargs):
+            TBase.__init__(self, *args, **kwargs)
+            assert isinstance(content_t, TBase) or isinstance(content_t, Defer)
+            self.content_t = content_t
+            self.content_t.parent = self
+
+        def default(self):
+            if self._default is not None:
+                return self._default
+            if self.optional:
+                return None
+            else:
+                return []
+
+        def has_default(self):
+            return True
+
+        def validate(self, val, regularize, depth):
+            return TBase.validate(self, val, regularize, depth+1)
+
+        def validate_children(self, val, regularize, depth):
+            for i, ele in enumerate(val):
+                newele = self.content_t.validate(ele, regularize, depth-1)
+                if regularize and newele is not ele:
+                    val[i] = newele
+
+            return val
+
+        def to_save(self, val):
+            return [ self.content_t.to_save([k, v]) for  k,v in val.items() ]
+
+        def to_save_xml(self, val):
+            return [ self.content_t.to_save_xml([k, v]) for k,v in val.items() ]
+
+        def deferred(self):
+            if isinstance( self.content_t, Defer):
+                return [ self.content_t ]
+
+            return []
+
+        def process_deferred(self, defer, t_inst):
+            if defer is self.content_t:
+                self.content_t = t_inst
+
+        def classname_for_help(self):
+            return '``dict`` of %s objects' % self.content_t.classname_for_help()
+
 
 class List(Object):
     dummy_for = list
