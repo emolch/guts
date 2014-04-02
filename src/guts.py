@@ -746,8 +746,8 @@ class Dict(Object):
 
         def __init__(self, key_t=Any.T(), content_t=Any.T(), *args, **kwargs):
             TBase.__init__(self, *args, **kwargs)
-            assert isinstance(key_t, TBase) or isinstance(key_t, Defer)
-            assert isinstance(content_t, TBase) or isinstance(content_t, Defer)
+            assert isinstance(key_t, TBase)
+            assert isinstance(content_t, TBase)
             self.key_t = key_t
             self.content_t = content_t
             self.content_t.parent = self
@@ -758,7 +758,7 @@ class Dict(Object):
             if self.optional:
                 return None
             else:
-                return []
+                return {}
 
         def has_default(self):
             return True
@@ -767,29 +767,22 @@ class Dict(Object):
             return TBase.validate(self, val, regularize, depth+1)
 
         def validate_children(self, val, regularize, depth):
-            for k, ele in val.items():
-                newkey = self.key_t.validate(k, regularize, depth-1)
+            for key, ele in val.items():
+                newkey = self.key_t.validate(key, regularize, depth-1)
                 newele = self.content_t.validate(ele, regularize, depth-1)
-                if regularize and newele is not ele:
-                    val[newkey] = newele
+                if regularize:
+                    if newkey is not key or newele is not ele:
+                        del val[key]
+                        val[newkey] = newele
             
             return val
 
         def to_save(self, val):
-            # {k: self.content_t.to_save(
-            return [ self.content_t.to_save({k:v}) for  k,v in val.items() ]
+            return dict((self.key_t.to_save(k), self.content_t.to_save(v))
+                        for (k,v) in val.iteritems())
 
         def to_save_xml(self, val):
-            return [ self.content_t.to_save_xml({k:v}) for k,v in val.items() ]
-
-        def deferred(self):
-            #if isinstance( self.content_t, Defer):
-            #    return [ self.content_t ]
-            return []
-
-        def process_deferred(self, defer, t_inst):
-            if defer is self.content_t:
-                self.content_t = t_inst
+            raise NotImplementedError()
 
         def classname_for_help(self):
             return '``dict`` of %s objects' % self.content_t.classname_for_help()
