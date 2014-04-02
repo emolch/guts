@@ -744,9 +744,11 @@ class Dict(Object):
     class __T(TBase):
         multivalued = True
 
-        def __init__(self, content_t=Any.T(), *args, **kwargs):
+        def __init__(self, key_t=Any.T(), content_t=Any.T(), *args, **kwargs):
             TBase.__init__(self, *args, **kwargs)
+            assert isinstance(key_t, TBase) or isinstance(key_t, Defer)
             assert isinstance(content_t, TBase) or isinstance(content_t, Defer)
+            self.key_t = key_t
             self.content_t = content_t
             self.content_t.parent = self
 
@@ -765,23 +767,24 @@ class Dict(Object):
             return TBase.validate(self, val, regularize, depth+1)
 
         def validate_children(self, val, regularize, depth):
-            for i, ele in enumerate(val):
+            for k, ele in val.items():
+                newkey = self.key_t.validate(k, regularize, depth-1)
                 newele = self.content_t.validate(ele, regularize, depth-1)
                 if regularize and newele is not ele:
-                    val[i] = newele
-
+                    val[newkey] = newele
+            
             return val
 
         def to_save(self, val):
-            return [ self.content_t.to_save([k, v]) for  k,v in val.items() ]
+            # {k: self.content_t.to_save(
+            return [ self.content_t.to_save({k:v}) for  k,v in val.items() ]
 
         def to_save_xml(self, val):
-            return [ self.content_t.to_save_xml([k, v]) for k,v in val.items() ]
+            return [ self.content_t.to_save_xml({k:v}) for k,v in val.items() ]
 
         def deferred(self):
-            if isinstance( self.content_t, Defer):
-                return [ self.content_t ]
-
+            #if isinstance( self.content_t, Defer):
+            #    return [ self.content_t ]
             return []
 
         def process_deferred(self, defer, t_inst):
