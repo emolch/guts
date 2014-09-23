@@ -262,6 +262,18 @@ class TestGuts(unittest.TestCase):
         self.assertIsNone(a.l2)
         self.assertEqual(a.l3, [1, 2, 3])
 
+    def testOptionalDict(self):
+        class A(Object):
+            d1 = Dict.T(String.T(), Int.T())
+            d2 = Dict.T(String.T(), Int.T(), optional=True)
+            d3 = Dict.T(String.T(), Int.T(), default={'bees': 1, 'flies': 5})
+
+        a = A()
+        a.validate()
+        self.assertEqual(a.d1, {})
+        self.assertIsNone(a.d2)
+        self.assertEqual(a.d3, {'bees': 1, 'flies': 5})
+
     def testSelfDeferred(self):
         class A(Object):
             a = Defer('A.T', optional=True)
@@ -581,9 +593,10 @@ def makeBasicTypeTest(Type, sample, sample_in=None, xml=False):
             c = Type.T(default=sample)
             d = List.T(Type.T())
             e = Tuple.T(1, Type.T())
+            f = Dict.T(Type.T(), Type.T())
             xmltagname = 'x'
 
-        x = X(a=sample_in, e=(sample_in,))
+        x = X(a=sample_in, e=(sample_in,), f={sample_in: sample_in})
         x.d.append(sample_in)
         if sample_in is not sample:
             with self.assertRaises(ValidationError):
@@ -615,19 +628,25 @@ def makeBasicTypeTest(Type, sample, sample_in=None, xml=False):
         self.assertEqualNanAware(x2.e[0], sample)
         self.assertEqual(len(x.e), 1)
         self.assertEqual(len(x2.e), 1)
+        self.assertTrue(isinstance(x.f, dict))
+        self.assertTrue(isinstance(x2.f, dict))
+        self.assertEqualNanAware(x.f[sample], sample)
+        self.assertEqualNanAware(x2.f[sample], sample)
+        self.assertEqual(len(x.f), 1)
+        self.assertEqual(len(x2.f), 1)
 
     return basicTypeTest
 
 for Type in samples:
     for isample, sample in enumerate(samples[Type]):
-        for xml in (False, True):
+        for xml in (False, ):
             setattr(TestGuts, 'testBasicType' + Type.__name__ + 
                     str(isample) + ['','XML'][xml], 
                     makeBasicTypeTest(Type, sample, xml=xml))
 
 for Type in regularize:
     for isample, (sample_in, sample) in enumerate(regularize[Type]):
-        for xml in (False, True):
+        for xml in (False, ):
             setattr(TestGuts, 'testBasicTypeRegularize' + Type.__name__ +
                     str(isample) + ['','XML'][xml], 
                     makeBasicTypeTest(Type, sample, sample_in=sample_in, xml=xml))
