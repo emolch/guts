@@ -6,9 +6,17 @@ try:
 except:
     from yaml import SafeLoader, SafeDumper
 
-import datetime, calendar, re, sys, time, math, types
-from itertools import izip
+import datetime
+import calendar
+import re
+import sys
+import time
+import math
+import types
+import platform
 from cStringIO import StringIO
+
+util_ext = None
 
 g_iprop = 0
 
@@ -18,26 +26,36 @@ g_deferred_content = {}
 g_tagname_to_class = {}
 g_xmltagname_to_class = {}
 
-guts_types = ['Object', 'SObject', 'String', 'Unicode', 'Int', 'Float', 'Complex', 'Bool', 
-        'Timestamp', 'DateTimestamp', 'StringPattern', 'UnicodePattern', 'StringChoice', 'List', 'Dict', 'Tuple', 'Union', 'Choice', 'Any']
+guts_types = ['Object', 'SObject', 'String', 'Unicode', 'Int', 'Float',
+              'Complex', 'Bool', 'Timestamp', 'DateTimestamp', 'StringPattern',
+              'UnicodePattern', 'StringChoice', 'List', 'Dict', 'Tuple',
+              'Union', 'Choice', 'Any']
 
 us_to_cc_regex = re.compile(r'([a-z])_([a-z])')
+
+
 def us_to_cc(s):
     return us_to_cc_regex.sub(lambda pat: pat.group(1)+pat.group(2).upper(), s)
 
 cc_to_us_regex1 = re.compile(r'([a-z])([A-Z]+)([a-z]|$)')
 cc_to_us_regex2 = re.compile(r'([A-Z])([A-Z][a-z])')
+
+
 def cc_to_us(s):
-    return cc_to_us_regex2.sub('\\1_\\2', cc_to_us_regex1.sub('\\1_\\2\\3', s)).lower()
+    return cc_to_us_regex2.sub(
+        '\\1_\\2', cc_to_us_regex1.sub('\\1_\\2\\3', s)).lower()
 
 re_frac = re.compile(r'\.[1-9]FRAC')
-frac_formats = dict([  ('.%sFRAC' % x, '%.'+x+'f') for x in '123456789' ] )
+frac_formats = dict([('.%sFRAC' % x, '%.'+x+'f') for x in '123456789'])
+
 
 def make_xmltagname_from_name(name):
     return us_to_cc(name)
 
+
 def make_name_from_xmltagname(xmltagname):
     return cc_to_us(xmltagname)
+
 
 def make_content_name(name):
     if name.endswith('_list'):
@@ -46,6 +64,7 @@ def make_content_name(name):
         return name[:-1]
     else:
         return name
+
 
 def expand_stream_args(mode):
     def wrap(f):
@@ -60,7 +79,7 @@ def expand_stream_args(mode):
             filename = kwargs.pop('filename', None)
             string = kwargs.pop('string', None)
 
-            assert sum( x is not None for x in (stream, filename, string) ) <= 1
+            assert sum(x is not None for x in (stream, filename, string)) <= 1
 
             if stream is not None:
                 kwargs['stream'] = stream
@@ -75,7 +94,7 @@ def expand_stream_args(mode):
                         try:
                             for x in gen:
                                 yield x
-                        
+
                         except GeneratorExit:
                             pass
 
@@ -88,28 +107,43 @@ def expand_stream_args(mode):
                     return retval
 
             elif string is not None:
-                assert mode == 'r', 'Keyword argument string=... cannot be used in dumper function.'
+                assert mode == 'r', \
+                    'Keyword argument string=... cannot be used in dumper ' \
+                    'function.'
                 kwargs['stream'] = StringIO(string)
                 return f(*args, **kwargs)
-            
+
             else:
-                assert mode == 'w', 'Use keyword argument stream=... or filename=... in loader function.'
+                assert mode == 'w', \
+                    'Use keyword argument stream=... or filename=... in ' \
+                    'loader function.'
                 sout = StringIO()
                 f(stream=sout, *args, **kwargs)
                 return sout.getvalue()
 
-
         return g
     return wrap
 
-class FractionalSecondsMissing(Exception):
-    '''Exception raised by :py:func:`str_to_time` when the given string lacks
-    fractional seconds.'''
+
+class TimeStrError(Exception):
     pass
 
-class FractionalSecondsWrongNumberOfDigits(Exception):
-    '''Exception raised by :py:func:`str_to_time` when the given string has an incorrect number of digits in the fractional seconds part.'''
+
+class FractionalSecondsMissing(TimeStrError):
+    '''
+    Exception raised by :py:func:`str_to_time` when the given string lacks
+    fractional seconds.
+    '''
     pass
+
+
+class FractionalSecondsWrongNumberOfDigits(TimeStrError):
+    '''
+    Exception raised by :py:func:`str_to_time` when the given string has an
+    incorrect number of digits in the fractional seconds part.
+    '''
+    pass
+
 
 def _endswith_n(s, endings):
     for ix, x in enumerate(endings):
@@ -117,77 +151,111 @@ def _endswith_n(s, endings):
             return ix
     return -1
 
+
 def str_to_time(s, format='%Y-%m-%d %H:%M:%S.OPTFRAC'):
-    '''Convert string representing UTC time to floating point system time.
-    
+    '''
+    Convert string representing UTC time to floating point system time.
+
     :param s: string representing UTC time
     :param format: time string format
     :returns: system time stamp as floating point value
-    
-    Uses the semantics of :py:func:`time.strptime` but allows for fractional seconds.
-    If the format ends with ``'.FRAC'``, anything after a dot is interpreted as
-    fractional seconds. If the format ends with ``'.OPTFRAC'``, the fractional part,
-    including the dot is made optional. The latter has the consequence, that the time 
-    strings and the format may not contain any other dots. If the format ends
-    with ``'.xFRAC'`` where x is 1, 2, or 3, it is ensured, that exactly that
-    number of digits are present in the fractional seconds.
+
+    Uses the semantics of :py:func:`time.strptime` but allows for fractional
+    seconds. If the format ends with ``'.FRAC'``, anything after a dot is
+    interpreted as fractional seconds. If the format ends with ``'.OPTFRAC'``,
+    the fractional part, including the dot is made optional. The latter has the
+    consequence, that the time strings and the format may not contain any other
+    dots. If the format ends with ``'.xFRAC'`` where x is 1, 2, or 3, it is
+    ensured, that exactly that number of digits are present in the fractional
+    seconds.
     '''
-        
+
+    if util_ext is not None:
+        try:
+            t, tfrac = util_ext.stt(s, format)
+        except util_ext.UtilExtError, e:
+            raise TimeStrError(
+                '%s, string=%s, format=%s' % (str(e), s, format))
+
+        return t+tfrac
+
     fracsec = 0.
     fixed_endings = '.FRAC', '.1FRAC', '.2FRAC', '.3FRAC'
-    
+
     iend = _endswith_n(format, fixed_endings)
     if iend != -1:
         dotpos = s.rfind('.')
         if dotpos == -1:
-            raise FractionalSecondsMissing('string=%s, format=%s' % (s,format))
-        
+            raise FractionalSecondsMissing(
+                'string=%s, format=%s' % (s, format))
+
         if iend > 0 and iend != (len(s)-dotpos-1):
-            raise FractionalSecondsWrongNumberOfDigits('string=%s, format=%s' % (s,format))
-        
+            raise FractionalSecondsWrongNumberOfDigits(
+                'string=%s, format=%s' % (s, format))
+
         format = format[:-len(fixed_endings[iend])]
         fracsec = float(s[dotpos:])
         s = s[:dotpos]
-        
+
     elif format.endswith('.OPTFRAC'):
         dotpos = s.rfind('.')
         format = format[:-8]
         if dotpos != -1 and len(s[dotpos:]) > 1:
             fracsec = float(s[dotpos:])
-        
+
         if dotpos != -1:
             s = s[:dotpos]
-      
-    return calendar.timegm(time.strptime(s, format)) + fracsec
+
+    try:
+        return calendar.timegm(time.strptime(s, format)) + fracsec
+    except ValueError, e:
+        raise TimeStrError('%s, string=%s, format=%s' % (str(e), s, format))
+
+
+stt = str_to_time
 
 
 def time_to_str(t, format='%Y-%m-%d %H:%M:%S.3FRAC'):
-    '''Get string representation for floating point system time.
-    
+    '''
+    Get string representation for floating point system time.
+
     :param t: floating point system time
     :param format: time string format
     :returns: string representing UTC time
-    
-    Uses the semantics of :py:func:`time.strftime` but additionally allows 
-    for fractional seconds. If *format* contains ``'.xFRAC'``, where ``x`` is a digit between 1 and 9, 
-    this is replaced with the fractional part of *t* with ``x`` digits precision.
+
+    Uses the semantics of :py:func:`time.strftime` but additionally allows for
+    fractional seconds. If ``format`` contains ``'.xFRAC'``, where ``x`` is a
+    digit between 1 and 9, this is replaced with the fractional part of ``t``
+    with ``x`` digits precision.
     '''
-    
+
     if isinstance(format, int):
         format = '%Y-%m-%d %H:%M:%S.'+str(format)+'FRAC'
-    
+
+    if util_ext is not None:
+        t0 = math.floor(t)
+        try:
+            return util_ext.tts(int(t0), t - t0, format)
+        except util_ext.UtilExtError, e:
+            raise TimeStrError(
+                '%s, timestamp=%f, format=%s' % (str(e), t, format))
+
     ts = float(math.floor(t))
     tfrac = t-ts
-    
+
     m = re_frac.search(format)
     if m:
         sfrac = (frac_formats[m.group(0)] % tfrac)
         if sfrac[0] == '1':
             ts += 1.
-                        
+
         format, nsub = re_frac.subn(sfrac[1:], format, 1)
-   
+
     return time.strftime(format, time.gmtime(ts))
+
+
+tts = time_to_str
+
 
 class Defer:
     def __init__(self, classname, *args, **kwargs):
@@ -201,10 +269,13 @@ class Defer:
         self.args = args
         self.kwargs = kwargs
 
+
 class TBase(object):
 
     strict = False
     multivalued = False
+    force_regularize = False
+    propnames = []
 
     @classmethod
     def init_propertystuff(cls):
@@ -214,7 +285,14 @@ class TBase(object):
         cls.xmltagname_to_class = {}
         cls.content_property = None
 
-    def __init__(self, default=None, optional=False, xmlstyle='element', xmltagname=None, help=None, position=None):
+    def __init__(
+            self,
+            default=None,
+            optional=False,
+            xmlstyle='element',
+            xmltagname=None,
+            help=None,
+            position=None):
 
         global g_iprop
         if position is not None:
@@ -270,13 +348,14 @@ class TBase(object):
     def remove_property(cls, name):
 
         prop = cls.get_property(name)
-        
+
         if not prop.multivalued:
             del cls.xmltagname_to_class[prop.effective_xmltagname]
             del cls.xmltagname_to_name[prop.effective_xmltagname]
         else:
             del cls.xmltagname_to_class[prop.content_t.effective_xmltagname]
-            del cls.xmltagname_to_name_multivalued[prop.content_t.effective_xmltagname]
+            del cls.xmltagname_to_name_multivalued[
+                prop.content_t.effective_xmltagname]
 
         if cls.content_property == prop:
             cls.content_property = None
@@ -289,7 +368,7 @@ class TBase(object):
     def add_property(cls, name, prop):
 
         prop.instance = prop
-        prop.name = name 
+        prop.name = name
 
         if isinstance(prop, Choice.T):
             for tc in prop.choices:
@@ -302,9 +381,12 @@ class TBase(object):
             cls.xmltagname_to_name[prop.effective_xmltagname] = prop.name
         else:
             prop.content_t.name = make_content_name(prop.name)
-            prop.content_t.effective_xmltagname = prop.content_t.get_xmltagname()
-            cls.xmltagname_to_class[prop.content_t.effective_xmltagname] = prop.content_t.cls
-            cls.xmltagname_to_name_multivalued[prop.content_t.effective_xmltagname] = prop.name
+            prop.content_t.effective_xmltagname = \
+                prop.content_t.get_xmltagname()
+            cls.xmltagname_to_class[
+                prop.content_t.effective_xmltagname] = prop.content_t.cls
+            cls.xmltagname_to_name_multivalued[
+                prop.content_t.effective_xmltagname] = prop.name
 
         cls.properties.append(prop)
 
@@ -335,9 +417,11 @@ class TBase(object):
 
         for prop in cls.properties:
             v = getattr(val, prop.name)
-            if v is not None and (not (prop.optional or (prop.multivalued and not v)) or prop.default() != v):
+            if v is not None and (
+                    not (prop.optional or (prop.multivalued and not v))
+                    or prop.default() != v):
                 if xmlmode:
-                    yield prop, prop.to_save_xml(v) 
+                    yield prop, prop.to_save_xml(v)
                 else:
                     yield prop, prop.to_save(v)
 
@@ -349,7 +433,7 @@ class TBase(object):
     @classmethod
     def translate_from_xml(cls, list_of_pairs, strict):
         d = {}
-        for k,v in list_of_pairs:
+        for k, v in list_of_pairs:
             if k in cls.xmltagname_to_name_multivalued:
                 k2 = cls.xmltagname_to_name_multivalued[k]
                 if k2 not in d:
@@ -359,15 +443,19 @@ class TBase(object):
             elif k in cls.xmltagname_to_name:
                 k2 = cls.xmltagname_to_name[k]
                 if k2 in d:
-                    raise ArgumentError('Unexpectedly found more than one child element "%s" within "%s".' % (k, cls.tagname))
+                    raise ArgumentError(
+                        'Unexpectedly found more than one child element "%s" '
+                        'within "%s".' % (k, cls.tagname))
                 d[k2] = v
             elif k is None:
                 if cls.content_property:
                     k2 = cls.content_property.name
                     d[k2] = v
             else:
-                if strict: 
-                    raise ArgumentError('Unexpected child element "%s" found within "%s".' % (k, cls.tagname))
+                if strict:
+                    raise ArgumentError(
+                        'Unexpected child element "%s" found within "%s".' % (
+                            k, cls.tagname))
 
         return d
 
@@ -377,16 +465,21 @@ class TBase(object):
 
         is_derived = isinstance(val, self.cls)
         is_exact = type(val) == self.cls
-        not_ok = not self.strict and not is_derived or self.strict and not is_exact
+        not_ok = not self.strict and not is_derived or \
+            self.strict and not is_exact
 
-        if not_ok:
+        if not_ok or self.force_regularize:
             if regularize:
                 try:
                     val = self.regularize_extra(val)
                 except (RegularizationError, ValueError):
-                    raise ValidationError('%s: could not convert "%s" to type %s' % (self.xname(), val, self.cls.__name__))
+                    raise ValidationError(
+                        '%s: could not convert "%s" to type %s' % (
+                            self.xname(), val, self.cls.__name__))
             else:
-                raise ValidationError('%s: "%s" (type: %s) is not of type %s' % (self.xname(), val, type(val), self.cls.__name__))
+                raise ValidationError(
+                    '%s: "%s" (type: %s) is not of type %s' % (
+                        self.xname(), val, type(val), self.cls.__name__))
 
         validator = self
         if type(val) != self.cls and isinstance(val, self.cls):
@@ -429,11 +522,30 @@ class TBase(object):
     def deferred(self):
         return []
 
-    def classname_for_help(self):
+    def classname_for_help(self, strip_module=''):
         if self.dummy_cls in guts_plain_dummy_types:
             return '``%s``' % self.cls.__name__
         else:
-            return ':py:class:`%s`' % self.tagname
+            mod = self.cls.__module__
+            cls = self.cls.__name__
+            if self.dummy_cls is not self.cls:
+                if self.dummy_cls.__module__ == strip_module:
+                    sadd = ' (:py:class:`%s`)' % (
+                        self.dummy_cls.__name__)
+                else:
+                    sadd = ' (:py:class:`%s.%s`)' % (
+                        self.dummy_cls.__module__, self.dummy_cls.__name__)
+            else:
+                sadd = ''
+
+            if mod == '__builtin__':
+                return '``%s``%s' % (cls, sadd)
+
+            elif self.cls.__module__ == strip_module:
+                return ':py:class:`%s`%s' % (cls, sadd)
+
+            else:
+                return ':py:class:`%s.%s`%s' % (mod, cls, sadd)
 
     @classmethod
     def props_help_string(cls):
@@ -441,14 +553,16 @@ class TBase(object):
         for base in cls.dummy_cls.__bases__:
             if hasattr(base, 'T'):
                 baseprops.extend(base.T.properties)
-            
+
         l = []
         l.append('')
         for prop in cls.properties:
             if prop in baseprops:
                 continue
 
-            descr = [ prop.classname_for_help() ]
+            descr = [
+                prop.classname_for_help(strip_module=cls.dummy_cls.__module__)]
+
             if prop.optional:
                 descr.append('*optional*')
 
@@ -456,13 +570,13 @@ class TBase(object):
             if d is not None:
                 descr.append('*default:* ``%s``' % repr(d))
 
-            if prop.help is not None:
-                descr.append(prop.help)
-            
             l.append('    .. py:attribute:: %s' % prop.name)
             l.append('')
             l.append('      %s' % ', '.join(descr))
             l.append('')
+            if prop.help is not None:
+                l.append('      %s' % prop.help)
+                l.append('')
 
         return '\n'.join(l)
 
@@ -491,6 +605,7 @@ class TBase(object):
     @classmethod
     def help(cls):
         return cls.props_help_string()
+
 
 class ObjectMetaClass(type):
     def __new__(meta, classname, bases, class_dict):
@@ -546,31 +661,34 @@ class ObjectMetaClass(type):
                 if isinstance(prop, TBase):
                     if prop.deferred():
                         for defer in prop.deferred():
-                            g_deferred_content.setdefault(defer.classname[:-2], []).append((prop,defer))
-                            g_deferred.setdefault(defer.classname[:-2], []).append((T,k,prop))
+                            g_deferred_content.setdefault(
+                                defer.classname[:-2], []).append((prop, defer))
+                            g_deferred.setdefault(
+                                defer.classname[:-2], []).append((T, k, prop))
 
                     else:
                         T.add_property(k, prop)
 
                 elif isinstance(prop, Defer):
-                    g_deferred.setdefault(prop.classname[:-2], []).append((T,k,prop))
+                    g_deferred.setdefault(prop.classname[:-2], []).append(
+                        (T, k, prop))
 
             if classname in g_deferred_content:
                 for prop, defer in g_deferred_content[classname]:
-                    prop.process_deferred(defer, T(*defer.args, **defer.kwargs))
+                    prop.process_deferred(
+                        defer, T(*defer.args, **defer.kwargs))
 
                 del g_deferred_content[classname]
 
             if classname in g_deferred:
                 for (T_, k_, prop_) in g_deferred.get(classname, []):
                     if isinstance(prop_, Defer):
-                        prop_ =  T(*prop_.args, **prop_.kwargs)
+                        prop_ = T(*prop_.args, **prop_.kwargs)
 
                     if not prop_.deferred():
                         T_.add_property(k_, prop_)
-                
-                del g_deferred[classname]
 
+                del g_deferred[classname]
 
             g_tagname_to_class[T.tagname] = cls
             if hasattr(cls, 'xmltagname'):
@@ -589,23 +707,28 @@ class ObjectMetaClass(type):
 
         return cls
 
+
 class ValidationError(Exception):
     pass
+
 
 class RegularizationError(Exception):
     pass
 
+
 class ArgumentError(Exception):
     pass
 
-class DefaultMaker:
+
+class DefaultMaker(object):
     def __init__(self, cls, args, kwargs):
         self.cls = cls
         self.args = args
         self.kwargs = kwargs
-    
+
     def make(self):
         return self.cls(*self.args, **self.kwargs)
+
 
 class Object(object):
     __metaclass__ = ObjectMetaClass
@@ -621,12 +744,14 @@ class Object(object):
                 setattr(self, k, kwargs.pop(k))
             else:
                 if not prop.optional and not prop.has_default():
-                    raise ArgumentError('Missing argument to %s: %s' % (self.T.tagname, prop.name))
+                    raise ArgumentError('Missing argument to %s: %s' % (
+                        self.T.tagname, prop.name))
                 else:
                     setattr(self, k, prop.default())
-        
+
         if kwargs:
-            raise ArgumentError('Invalid argument to %s: %s' % (self.T.tagname, ', '.join(kwargs.keys())))
+            raise ArgumentError('Invalid argument to %s: %s' % (
+                self.T.tagname, ', '.join(kwargs.keys())))
 
     @classmethod
     def D(cls, *args, **kwargs):
@@ -657,7 +782,7 @@ class Object(object):
 
 
 class SObject(Object):
-    
+
     class __T(TBase):
         def regularize_extra(self, val):
             if isinstance(val, basestring):
@@ -681,6 +806,7 @@ class Any(Object):
 
             return val
 
+
 class Int(Object):
     dummy_for = int
 
@@ -689,6 +815,7 @@ class Int(Object):
 
         def to_save_xml(self, value):
             return repr(value)
+
 
 class Float(Object):
     dummy_for = float
@@ -699,9 +826,10 @@ class Float(Object):
         def to_save_xml(self, value):
             return repr(value)
 
+
 class Complex(Object):
     dummy_for = complex
-    
+
     class __T(TBase):
         strict = True
 
@@ -722,6 +850,7 @@ class Complex(Object):
         def to_save_xml(self, value):
             return repr(value)
 
+
 class Bool(Object):
     dummy_for = bool
 
@@ -738,13 +867,16 @@ class Bool(Object):
         def to_save_xml(self, value):
             return repr(bool(value)).lower()
 
+
 class String(Object):
     dummy_for = str
+
 
 class Unicode(Object):
     dummy_for = unicode
 
 guts_plain_dummy_types = (String, Unicode, Int, Float, Complex, Bool)
+
 
 class Dict(Object):
     dummy_for = dict
@@ -782,18 +914,19 @@ class Dict(Object):
                     if newkey is not key or newele is not ele:
                         del val[key]
                         val[newkey] = newele
-            
+
             return val
 
         def to_save(self, val):
             return dict((self.key_t.to_save(k), self.content_t.to_save(v))
-                        for (k,v) in val.iteritems())
+                        for (k, v) in val.iteritems())
 
         def to_save_xml(self, val):
             raise NotImplementedError()
 
-        def classname_for_help(self):
-            return '``dict`` of %s objects' % self.content_t.classname_for_help()
+        def classname_for_help(self, strip_module=""):
+            return '``dict`` of %s objects' % \
+                self.content_t.classname_for_help(strip_module=strip_module)
 
 
 class List(Object):
@@ -831,14 +964,14 @@ class List(Object):
             return val
 
         def to_save(self, val):
-            return [ self.content_t.to_save(v) for v in val ]
+            return [self.content_t.to_save(v) for v in val]
 
         def to_save_xml(self, val):
-            return [ self.content_t.to_save_xml(v) for v in val ]
+            return [self.content_t.to_save_xml(v) for v in val]
 
         def deferred(self):
-            if isinstance( self.content_t, Defer):
-                return [ self.content_t ]
+            if isinstance(self.content_t, Defer):
+                return [self.content_t]
 
             return []
 
@@ -846,8 +979,10 @@ class List(Object):
             if defer is self.content_t:
                 self.content_t = t_inst
 
-        def classname_for_help(self):
-            return '``list`` of %s objects' % self.content_t.classname_for_help()
+        def classname_for_help(self, strip_module=''):
+            return '``list`` of %s objects' % \
+                self.content_t.classname_for_help(strip_module=strip_module)
+
 
 def make_typed_list_class(t):
     class O(List):
@@ -856,6 +991,7 @@ def make_typed_list_class(t):
                 List.T.__init__(self, content_t=t.T(), *args, **kwargs)
 
     return O
+
 
 class Tuple(Object):
     dummy_for = tuple
@@ -877,10 +1013,10 @@ class Tuple(Object):
                 return None
             else:
                 if self.n is not None:
-                    return tuple( self.content_t.default() for x in xrange(self.n) )
+                    return tuple(
+                        self.content_t.default() for x in xrange(self.n))
                 else:
                     return tuple()
-
 
         def has_default(self):
             return True
@@ -890,7 +1026,8 @@ class Tuple(Object):
 
         def validate_extra(self, val):
             if self.n is not None and len(val) != self.n:
-                raise ValidationError('%s should have length %i' % (self.xname(), self.n))
+                raise ValidationError(
+                    '%s should have length %i' % (self.xname(), self.n))
 
             return val
 
@@ -908,23 +1045,28 @@ class Tuple(Object):
                     newval.append(newele)
                     if newele is not ele:
                         isnew = True
-                
+
                 if isnew:
                     return tuple(newval)
                 else:
                     return val
 
         def to_save(self, val):
-            return tuple( self.content_t.to_save(v) for v in val )
+            return tuple(self.content_t.to_save(v) for v in val)
 
         def to_save_xml(self, val):
-            return [ self.content_t.to_save_xml(v) for v in val ]
+            return [self.content_t.to_save_xml(v) for v in val]
 
-        def classname_for_help(self):
+        def classname_for_help(self, strip_module=''):
             if self.n is not None:
-                return '``tuple`` of %i %s objects' % (self.n, self.content_t.classname_for_help())
+                return '``tuple`` of %i %s objects' % (
+                    self.n, self.content_t.classname_for_help(
+                        strip_module=strip_module))
             else:
-                return '``tuple`` of %s objects' % (self.content_t.classname_for_help())
+                return '``tuple`` of %s objects' % (
+                    self.content_t.classname_for_help(
+                        strip_module=strip_module))
+
 
 class Timestamp(Object):
     dummy_for = float
@@ -934,7 +1076,7 @@ class Timestamp(Object):
         def regularize_extra(self, val):
             if isinstance(val, datetime.datetime):
                 tt = val.utctimetuple()
-                val = calendar.timegm(tt) + val.microsecond * 1e-6  
+                val = calendar.timegm(tt) + val.microsecond * 1e-6
 
             elif isinstance(val, datetime.date):
                 tt = val.timetuple()
@@ -946,20 +1088,21 @@ class Timestamp(Object):
                 if val[10] == 'T':
                     val = val.replace('T', ' ', 1)
                 val = str_to_time(val)
-            
+
             elif isinstance(val, int):
                 val = float(val)
 
             else:
-                raise ValidationError('%s: cannot convert "%s" to float' % (self.xname(), val))
+                raise ValidationError('%s: cannot convert "%s" to float' % (
+                    self.xname(), val))
 
             return val
-        
+
         def to_save(self, val):
             return datetime.datetime.utcfromtimestamp(val)
 
         def to_save_xml(self, val):
-            return datetime.datetime.utcfromtimestamp(val).isoformat()
+            return datetime.datetime.utcfromtimestamp(val).isoformat() + 'Z'
 
 
 class DateTimestamp(Object):
@@ -970,21 +1113,22 @@ class DateTimestamp(Object):
         def regularize_extra(self, val):
             if isinstance(val, datetime.datetime):
                 tt = val.utctimetuple()
-                val = calendar.timegm(tt) + val.microsecond * 1e-6  
+                val = calendar.timegm(tt) + val.microsecond * 1e-6
 
             elif isinstance(val, str) or isinstance(val, unicode):
                 val = str_to_time(val, format='%Y-%m-%d')
-            
+
             if not isinstance(val, float):
                 val = float(val)
 
             return val
-        
+
         def to_save(self, val):
             return time_to_str(val, format='%Y-%m-%d')
 
         def to_save_xml(self, val):
             return time_to_str(val, format='%Y-%m-%d')
+
 
 class StringPattern(String):
 
@@ -1005,13 +1149,14 @@ class StringPattern(String):
         def validate_extra(self, val):
             pat = self.pattern
             if not re.search(pat, val):
-                raise ValidationError('%s: "%s" does not match pattern %s' % (self.xname(), val, repr(pat)))
+                raise ValidationError('%s: "%s" does not match pattern %s' % (
+                    self.xname(), val, repr(pat)))
 
         @classmethod
         def class_help_string(cls):
             dcls = cls.dummy_cls
             doc = dcls.__doc_template__ or StringPattern.__doc_template__
-            return doc % { 'pattern': repr(dcls.pattern) }
+            return doc % {'pattern': repr(dcls.pattern)}
 
 
 class UnicodePattern(Unicode):
@@ -1033,13 +1178,14 @@ class UnicodePattern(Unicode):
         def validate_extra(self, val):
             pat = self.pattern
             if not re.search(pat, val, flags=re.UNICODE):
-                raise ValidationError('%s: "%s" does not match pattern %s' % (self.xname(), val, repr(pat)))
+                raise ValidationError('%s: "%s" does not match pattern %s' % (
+                    self.xname(), val, repr(pat)))
 
         @classmethod
         def class_help_string(cls):
             dcls = cls.dummy_cls
             doc = dcls.__doc_template__ or UnicodePattern.__doc_template__
-            return doc % { 'pattern': repr(dcls.pattern) }
+            return doc % {'pattern': repr(dcls.pattern)}
 
 
 class StringChoice(String):
@@ -1048,9 +1194,10 @@ class StringChoice(String):
 
     dummy_for = str
     choices = []
+    ignore_case = False
 
     class __T(TBase):
-        def __init__(self, choices=None, *args, **kwargs):
+        def __init__(self, choices=None, ignore_case=None, *args, **kwargs):
             TBase.__init__(self, *args, **kwargs)
 
             if choices is not None:
@@ -1058,18 +1205,29 @@ class StringChoice(String):
             else:
                 self.choices = self.dummy_cls.choices
 
+            if ignore_case is not None:
+                self.ignore_case = ignore_case
+            else:
+                self.ignore_case = self.dummy_cls.ignore_case
+
+            if self.ignore_case:
+                self.choices = [x.upper() for x in self.choices]
+
         def validate_extra(self, val):
+            if self.ignore_case:
+                val = val.upper()
+
             if val not in self.choices:
                 raise ValidationError(
-                        '%s: "%s" is not a valid choice out of %s' % 
-                        (self.xname(), val, repr(self.choices)))
+                    '%s: "%s" is not a valid choice out of %s' % (
+                        self.xname(), val, repr(self.choices)))
 
         @classmethod
         def class_help_string(cls):
             dcls = cls.dummy_cls
             doc = dcls.__doc_template__ or StringChoice.__doc_template__
-            return doc % { 'choices': repr(dcls.choices) }
-                
+            return doc % {'choices': repr(dcls.choices)}
+
 
 # this will not always work...
 class Union(Object):
@@ -1106,21 +1264,23 @@ class Choice(Object):
             else:
                 self.choices = self.dummy_cls.choices
 
-            self.cls_to_xmltagname = dict((t.cls, t.get_xmltagname()) for t in self.choices)
+            self.cls_to_xmltagname = dict(
+                (t.cls, t.get_xmltagname()) for t in self.choices)
 
         def validate(self, val, regularize=False, depth=-1):
             if self.optional and val is None:
                 return val
 
             t = None
-            for  tc in self.choices:
+            for tc in self.choices:
                 is_derived = isinstance(val, tc.cls)
                 is_exact = type(val) == tc.cls
-                if not (not tc.strict and not is_derived or tc.strict and not is_exact):
+                if not (not tc.strict and not is_derived or
+                        tc.strict and not is_exact):
                     t = tc
                     break
-            
-            if t is None: 
+
+            if t is None:
                 if regularize:
                     ok = False
                     for tc in self.choices:
@@ -1129,13 +1289,19 @@ class Choice(Object):
                             ok = True
                             t = tc
                             break
-                        except (RegularizationError, ValueError), e:
+                        except (RegularizationError, ValueError):
                             pass
 
-                    if not ok: 
-                        raise ValidationError('%s: could not convert "%s" to any type out of (%s)' % (self.xname(), val, ','.join(x.cls.__name__ for x in self.choices)))
+                    if not ok:
+                        raise ValidationError(
+                            '%s: could not convert "%s" to any type out of '
+                            '(%s)' % (self.xname(), val, ','.join(
+                                x.cls.__name__ for x in self.choices)))
                 else:
-                    raise ValidationError('%s: "%s" (type: %s) is not of any type out of (%s)' % (self.xname(), val, type(val), ','.join(x.cls.__name__ for x in self.choices)))
+                    raise ValidationError(
+                        '%s: "%s" (type: %s) is not of any type out of '
+                        '(%s)' % (self.xname(), val, type(val), ','.join(
+                            x.cls.__name__ for x in self.choices)))
 
             validator = t
             if type(val) != t.cls and isinstance(val, t.cls):
@@ -1147,7 +1313,7 @@ class Choice(Object):
                 val = validator.validate_children(val, regularize, depth)
 
             return val
-        
+
         def extend_xmlelements(self, elems, v):
             elems.append((self.cls_to_xmltagname[type(v)], v))
 
@@ -1157,29 +1323,36 @@ def _dump(object, stream, header=False, _dump_function=yaml.dump):
     if header:
         stream.write('%YAML 1.1\n')
         if isinstance(header, basestring):
-            banner = '\n'.join( '# ' + x for x in header.splitlines() )
+            banner = '\n'.join('# ' + x for x in header.splitlines())
             stream.write(banner)
             stream.write('\n')
 
-    _dump_function(object, stream=stream, explicit_start=True, Dumper=SafeDumper)
+    _dump_function(
+        object, stream=stream, explicit_start=True, Dumper=SafeDumper)
+
 
 def _dump_all(object, stream, header=True):
     _dump(object, stream=stream, header=header, _dump_function=yaml.dump_all)
 
+
 def _load(stream):
     return yaml.load(stream=stream, Loader=SafeLoader)
+
 
 def _load_all(stream):
     return list(yaml.load_all(stream=stream, Loader=SafeLoader))
 
+
 def _iload_all(stream):
     return yaml.load_all(stream=stream, Loader=SafeLoader)
 
+
 def multi_representer(dumper, data):
-    node = dumper.represent_mapping('!'+data.T.tagname, 
-            data.T.inamevals_to_save(data), flow_style=False)
+    node = dumper.represent_mapping(
+        '!'+data.T.tagname, data.T.inamevals_to_save(data), flow_style=False)
 
     return node
+
 
 def multi_constructor(loader, tag_suffix, node):
     tagname = str(tag_suffix)
@@ -1189,12 +1362,15 @@ def multi_constructor(loader, tag_suffix, node):
     o.validate(regularize=True, depth=1)
     return o
 
+
 def dict_noflow_representer(dumper, data):
-    return dumper.represent_mapping('tag:yaml.org,2002:map', data, flow_style=False)
+    return dumper.represent_mapping(
+        'tag:yaml.org,2002:map', data, flow_style=False)
 
 yaml.add_multi_representer(Object, multi_representer, Dumper=SafeDumper)
 yaml.add_multi_constructor('!', multi_constructor, Loader=SafeLoader)
 yaml.add_representer(dict, dict_noflow_representer, Dumper=SafeDumper)
+
 
 class Constructor(object):
     def __init__(self, add_namespace_maps=False, strict=False):
@@ -1209,7 +1385,8 @@ class Constructor(object):
         name = name.split()[-1]
         if self.stack and self.stack[-1][1] is not None:
             cls = self.stack[-1][1].T.xmltagname_to_class.get(name, None)
-            if cls is not None and (not issubclass(cls, Object) or issubclass(cls, SObject)):
+            if cls is not None and (
+                    not issubclass(cls, Object) or issubclass(cls, SObject)):
                 cls = None
         else:
             cls = g_xmltagname_to_class.get(name, None)
@@ -1221,23 +1398,22 @@ class Constructor(object):
         name, cls, attrs, content2, content1 = self.stack.pop()
 
         if cls is not None:
-            content2.extend( x for x in attrs.iteritems() )
-            content2.append( (None, ''.join(content1)) )
+            content2.extend(x for x in attrs.iteritems())
+            content2.append((None, ''.join(content1)))
             o = cls(**cls.T.translate_from_xml(content2, self.strict))
             o.validate(regularize=True, depth=1)
             if self.add_namespace_maps:
                 o.namespace_map = dict(self.namespaces)
 
             if self.stack and not all(x[1] is None for x in self.stack):
-                self.stack[-1][-2].append((name,o))
+                self.stack[-1][-2].append((name, o))
             else:
                 self.queue.append(o)
         else:
-            content = [ ''.join(content1) ]
+            content = [''.join(content1)]
             if self.stack:
                 for c in content:
-                    self.stack[-1][-2].append((name,c))
-
+                    self.stack[-1][-2].append((name, c))
 
     def characters(self, char_content):
         if self.stack:
@@ -1253,18 +1429,22 @@ class Constructor(object):
     def end_namespace(self, ns):
         del self.namespaces_rev[self.namespaces[ns]]
         del self.namespaces[ns]
-    
+
     def get_queued_elements(self):
         queue = self.queue
         self.queue = []
-        return queue 
+        return queue
 
-def _iload_all_xml(stream, bufsize=100000, add_namespace_maps=False, strict=False):
+
+def _iload_all_xml(
+        stream,
+        bufsize=100000, add_namespace_maps=False, strict=False):
+
     from xml.parsers.expat import ParserCreate
 
     parser = ParserCreate(namespace_separator=' ')
 
-    handler = Constructor(add_namespace_maps=add_namespace_maps, strict=strict) 
+    handler = Constructor(add_namespace_maps=add_namespace_maps, strict=strict)
 
     parser.StartElementHandler = handler.start_element
     parser.EndElementHandler = handler.end_element
@@ -1281,8 +1461,10 @@ def _iload_all_xml(stream, bufsize=100000, add_namespace_maps=False, strict=Fals
         if not data:
             break
 
+
 def _load_all_xml(*args, **kwargs):
     return list(_iload_all_xml(*args, **kwargs))
+
 
 def _load_xml(*args, **kwargs):
     g = _iload_all_xml(*args, **kwargs)
@@ -1300,8 +1482,9 @@ def _dump_all_xml(objects, stream, root_element_name='root', header=True):
 
     for object in objects:
         _dump_xml(object, stream=stream)
-        
+
     stream.write(end)
+
 
 def _dump_xml_header(stream, banner=None):
 
@@ -1314,7 +1497,7 @@ def _dump_xml_header(stream, banner=None):
 
 def _dump_xml(obj, stream, depth=0, xmltagname=None, header=False):
     from xml.sax.saxutils import escape, quoteattr
-        
+
     if depth == 0 and header:
         _dump_xml_header(stream, header)
 
@@ -1325,12 +1508,10 @@ def _dump_xml(obj, stream, depth=0, xmltagname=None, header=False):
     if isinstance(obj, Object):
         obj.validate(depth=1)
         attrs = []
-        allattrs = True
         elems = []
-        conent = []
         for prop, v in obj.T.ipropvals_to_save(obj, xmlmode=True):
             if prop.xmlstyle == 'attribute':
-                assert not prop.multivalued 
+                assert not prop.multivalued
                 assert not isinstance(v, Object)
                 attrs.append((prop.effective_xmltagname, v))
 
@@ -1342,58 +1523,108 @@ def _dump_xml(obj, stream, depth=0, xmltagname=None, header=False):
             else:
                 prop.extend_xmlelements(elems, v)
 
-
         attr_str = ''
         if attrs:
-            attr_str = ' ' + ' '.join( '%s=%s' % (k, quoteattr(str(v))) for (k,v) in attrs )
-            
+            attr_str = ' ' + ' '.join(
+                '%s=%s' % (k, quoteattr(str(v))) for (k, v) in attrs)
+
         if not elems:
             stream.write('%s<%s%s />\n' % (indent, xmltagname, attr_str))
         else:
             oneline = len(elems) == 1 and elems[0][0] is None
-            stream.write(u'%s<%s%s>%s' % (indent, xmltagname, attr_str, ('\n','')[oneline]))
-            for (k,v) in elems:
+            stream.write(u'%s<%s%s>%s' % (
+                indent, xmltagname, attr_str, ('\n', '')[oneline]))
+
+            for (k, v) in elems:
                 if k is None:
-                    stream.write('%s' % escape(unicode(v), {'\0': '&#00;'}).encode('utf8'))
+                    stream.write(
+                        '%s' % escape(unicode(v), {'\0': '&#00;'})
+                        .encode('utf8'))
                 else:
                     _dump_xml(v, stream=stream, depth=depth+1, xmltagname=k)
 
-            stream.write('%s</%s>\n' % ((indent,'')[oneline], xmltagname))
+            stream.write('%s</%s>\n' % ((indent, '')[oneline], xmltagname))
     else:
-        stream.write('%s<%s>%s</%s>\n' % (indent, xmltagname, escape(unicode(obj), {'\0': '&#00;'}).encode('utf8'), xmltagname))
+        stream.write('%s<%s>%s</%s>\n' % (
+            indent,
+            xmltagname,
+            escape(unicode(obj), {'\0': '&#00;'}).encode('utf8'),
+            xmltagname))
 
-def walk(x, typ=None, path=[]):
+
+def walk(x, typ=None, path=()):
     if typ is None or isinstance(x, typ):
         yield path, x
+
     if isinstance(x, Object):
         for (prop, val) in x.T.ipropvals(x):
             if prop.multivalued:
-                for iele, ele in enumerate(val):
-                    for y in walk(ele, typ, path=path+[ '%s[%i]' % (prop.name, iele)]):
-                        yield y
+                if val is not None:
+                    for iele, ele in enumerate(val):
+                        for y in walk(ele, typ,
+                                      path=path + ((prop.name, iele),)):
+                            yield y
             else:
-                for y in walk(val, typ, path=path+[prop.name]):
+                for y in walk(val, typ, path=path + (prop.name,)):
                     yield y
+
+
+def zip_walk(x, typ=None, path=(), stack=()):
+    if typ is None or isinstance(x, typ):
+        yield path, stack + (x,)
+
+    if isinstance(x, Object):
+        for (prop, val) in x.T.ipropvals(x):
+            if prop.multivalued:
+                if val is not None:
+                    for iele, ele in enumerate(val):
+                        for y in zip_walk(
+                                ele, typ,
+                                path=path + ((prop.name, iele),),
+                                stack=stack + (x,)):
+
+                            yield y
+            else:
+                for y in zip_walk(val, typ,
+                                  path=path+(prop.name,),
+                                  stack=stack + (x,)):
+                    yield y
+
+
+def path_element(x):
+    if isinstance(x, tuple):
+        return '%s[%i]' % x
+    else:
+        return x
+
+
+def path_to_str(path):
+    return '.'.join(path_element(x) for x in path)
 
 
 @expand_stream_args('w')
 def dump(*args, **kwargs):
     return _dump(*args, **kwargs)
 
+
 @expand_stream_args('r')
 def load(*args, **kwargs):
     return _load(*args, **kwargs)
 
+
 def load_string(s, *args, **kwargs):
     return load(string=s, *args, **kwargs)
+
 
 @expand_stream_args('w')
 def dump_all(*args, **kwargs):
     return _dump_all(*args, **kwargs)
 
+
 @expand_stream_args('r')
 def load_all(*args, **kwargs):
     return _load_all(*args, **kwargs)
+
 
 @expand_stream_args('r')
 def iload_all(*args, **kwargs):
@@ -1404,34 +1635,39 @@ def iload_all(*args, **kwargs):
 def dump_xml(*args, **kwargs):
     return _dump_xml(*args, **kwargs)
 
+
 @expand_stream_args('r')
 def load_xml(*args, **kwargs):
     return _load_xml(*args, **kwargs)
 
+
 def load_xml_string(s, *args, **kwargs):
     return load_xml(string=s, *args, **kwargs)
+
 
 @expand_stream_args('w')
 def dump_all_xml(*args, **kwargs):
     return _dump_all_xml(*args, **kwargs)
 
+
 @expand_stream_args('r')
 def load_all_xml(*args, **kwargs):
     return _load_all_xml(*args, **kwargs)
+
 
 @expand_stream_args('r')
 def iload_all_xml(*args, **kwargs):
     return _iload_all_xml(*args, **kwargs)
 
 
-__all__ = guts_types + [ 'guts_types', 'TBase', 'ValidationError', 
-        'ArgumentError', 'Defer', 
-        'dump', 'load',
-        'dump_all', 'load_all', 'iload_all',
-        'dump_xml', 'load_xml', 
-        'dump_all_xml', 'load_all_xml', 'iload_all_xml',
-        'load_string',
-        'load_xml_string',
-        'make_typed_list_class', 'walk'
-        ] 
-
+__all__ = guts_types + [
+    'guts_types', 'TBase', 'ValidationError',
+    'ArgumentError', 'Defer',
+    'dump', 'load',
+    'dump_all', 'load_all', 'iload_all',
+    'dump_xml', 'load_xml',
+    'dump_all_xml', 'load_all_xml', 'iload_all_xml',
+    'load_string',
+    'load_xml_string',
+    'make_typed_list_class', 'walk', 'zip_walk', 'path_to_str'
+]
