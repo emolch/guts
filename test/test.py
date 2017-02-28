@@ -1,4 +1,3 @@
-
 import unittest
 import calendar
 import math
@@ -311,11 +310,15 @@ class TestGuts(unittest.TestCase):
 
     .. py:attribute:: b
 
-      ``float``, *default:* ``0``, the b property
+      ``float``, *default:* ``0``
+
+      the b property
 
     .. py:attribute:: c
 
-      ``list`` of ``int`` objects, *default:* ``[]``, the c
+      ``list`` of ``int`` objects, *default:* ``[]``
+
+      the c
 ''')
 
     def testContentStyleXML(self):
