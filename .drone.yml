@@ -1,0 +1,23 @@
+kind: pipeline
+type: docker
+name: flake8
+
+steps:
+- name: flake8
+  image: python:3.7
+  commands:
+  - pip3 install flake8
+  - flake8 src test setup.py
+
+---
+
+kind: pipeline
+type: docker
+name: unittest
+
+steps:
+- name: unittest
+  image: python:3.7
+  commands:
+  - pip3 install .
+  - python3 -m unittest discover -s test
