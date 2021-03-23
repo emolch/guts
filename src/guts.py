@@ -1,22 +1,54 @@
-'''Lightweight declarative YAML and XML data binding for Python.'''
-
-import yaml
-try:
-    from yaml import CSafeLoader as SafeLoader, CSafeDumper as SafeDumper
-except:
-    from yaml import SafeLoader, SafeDumper
+# -*- coding: utf-8 -*-
+# http://pyrocko.org - GPLv3
+#
+# The Pyrocko Developers, 21st Century
+# ---|P------/S----------~Lg----------
+"""Lightweight declarative YAML and XML data binding for Python."""
+# from __future__ import absolute_import, print_function
 
 import datetime
 import calendar
 import re
 import sys
-import time
-import math
 import types
-import platform
-from cStringIO import StringIO
+import copy
+from collections import defaultdict
 
-util_ext = None
+from io import BytesIO
+
+try:
+    import numpy as num
+except ImportError:
+    num = None
+
+import yaml
+try:
+    from yaml import CSafeLoader as SafeLoader, CSafeDumper as SafeDumper
+except ImportError:
+    from yaml import SafeLoader, SafeDumper
+
+from util import time_to_str, str_to_time, TimeStrError
+
+try:
+    newstr = unicode
+    range = xrange
+except NameError:
+    newstr = str
+
+
+class GutsSafeDumper(SafeDumper):
+    pass
+
+
+class GutsSafeLoader(SafeLoader):
+    pass
+
+
+try:
+    unicode
+except NameError:
+    unicode = str
+
 
 g_iprop = 0
 
@@ -25,28 +57,151 @@ g_deferred_content = {}
 
 g_tagname_to_class = {}
 g_xmltagname_to_class = {}
+g_guessable_xmlns = {}
 
-guts_types = ['Object', 'SObject', 'String', 'Unicode', 'Int', 'Float',
-              'Complex', 'Bool', 'Timestamp', 'DateTimestamp', 'StringPattern',
-              'UnicodePattern', 'StringChoice', 'List', 'Dict', 'Tuple',
-              'Union', 'Choice', 'Any']
+guts_types = [
+    'Object', 'SObject', 'String', 'Unicode', 'Int', 'Float',
+    'Complex', 'Bool', 'Timestamp', 'DateTimestamp', 'StringPattern',
+    'UnicodePattern', 'StringChoice', 'List', 'Dict', 'Tuple', 'Union',
+    'Choice', 'Any']
 
 us_to_cc_regex = re.compile(r'([a-z])_([a-z])')
 
 
+class literal(str):
+    pass
+
+
+class folded(str):
+    pass
+
+
+class singlequoted(str):
+    pass
+
+
+class doublequoted(str):
+    pass
+
+
+def make_str_presenter(style):
+    def presenter(dumper, data):
+        return dumper.represent_scalar(
+            'tag:yaml.org,2002:str', str(data), style=style)
+
+    return presenter
+
+
+str_style_map = {
+    None: lambda x: x,
+    '|': literal,
+    '>': folded,
+    "'": singlequoted,
+    '"': doublequoted}
+
+for (style, cls) in str_style_map.items():
+    if style:
+        GutsSafeDumper.add_representer(cls, make_str_presenter(style))
+
+
+class uliteral(unicode):
+    pass
+
+
+class ufolded(unicode):
+    pass
+
+
+class usinglequoted(unicode):
+    pass
+
+
+class udoublequoted(unicode):
+    pass
+
+
+def make_unicode_presenter(style):
+    def presenter(dumper, data):
+        return dumper.represent_scalar(
+            'tag:yaml.org,2002:str', unicode(data), style=style)
+
+    return presenter
+
+
+unicode_style_map = {
+    None: lambda x: x,
+    '|': literal,
+    '>': folded,
+    "'": singlequoted,
+    '"': doublequoted}
+
+for (style, cls) in unicode_style_map.items():
+    if style:
+        GutsSafeDumper.add_representer(cls, make_unicode_presenter(style))
+
+
+class blist(list):
+    pass
+
+
+class flist(list):
+    pass
+
+
+list_style_map = {
+    None: list,
+    'block': blist,
+    'flow': flist}
+
+
+def make_list_presenter(flow_style):
+    def presenter(dumper, data):
+        return dumper.represent_sequence(
+            'tag:yaml.org,2002:seq', data, flow_style=flow_style)
+
+    return presenter
+
+
+GutsSafeDumper.add_representer(blist, make_list_presenter(False))
+GutsSafeDumper.add_representer(flist, make_list_presenter(True))
+
+if num:
+    def numpy_float_presenter(dumper, data):
+        return dumper.represent_float(float(data))
+
+    def numpy_int_presenter(dumper, data):
+        return dumper.represent_int(int(data))
+
+    for dtype in (num.float64, num.float32):
+        GutsSafeDumper.add_representer(dtype, numpy_float_presenter)
+
+    for dtype in (num.int32, num.int64):
+        GutsSafeDumper.add_representer(dtype, numpy_int_presenter)
+
+
 def us_to_cc(s):
     return us_to_cc_regex.sub(lambda pat: pat.group(1)+pat.group(2).upper(), s)
+
 
 cc_to_us_regex1 = re.compile(r'([a-z])([A-Z]+)([a-z]|$)')
 cc_to_us_regex2 = re.compile(r'([A-Z])([A-Z][a-z])')
 
 
 def cc_to_us(s):
-    return cc_to_us_regex2.sub(
-        '\\1_\\2', cc_to_us_regex1.sub('\\1_\\2\\3', s)).lower()
+    return cc_to_us_regex2.sub('\\1_\\2', cc_to_us_regex1.sub(
+        '\\1_\\2\\3', s)).lower()
+
 
 re_frac = re.compile(r'\.[1-9]FRAC')
 frac_formats = dict([('.%sFRAC' % x, '%.'+x+'f') for x in '123456789'])
+
+
+def encode_utf8(s):
+    return s.encode('utf-8')
+
+
+def no_encode(s):
+    return s
 
 
 def make_xmltagname_from_name(name):
@@ -68,11 +223,11 @@ def make_content_name(name):
 
 def expand_stream_args(mode):
     def wrap(f):
-        '''Decorator to enhance functions taking stream objects.
+        """Decorator to enhance functions taking stream objects.
 
         Wraps a function f(..., stream, ...) so that it can also be called as
         f(..., filename='myfilename', ...) or as f(..., string='mydata', ...).
-        '''
+        """
 
         def g(*args, **kwargs):
             stream = kwargs.pop('stream', None)
@@ -86,7 +241,7 @@ def expand_stream_args(mode):
                 return f(*args, **kwargs)
 
             elif filename is not None:
-                stream = open(filename, mode)
+                stream = open(filename, mode+'b')
                 kwargs['stream'] = stream
                 retval = f(*args, **kwargs)
                 if isinstance(retval, types.GeneratorType):
@@ -110,154 +265,25 @@ def expand_stream_args(mode):
                 assert mode == 'r', \
                     'Keyword argument string=... cannot be used in dumper ' \
                     'function.'
-                kwargs['stream'] = StringIO(string)
+
+                kwargs['stream'] = BytesIO(string.encode('utf-8'))
                 return f(*args, **kwargs)
 
             else:
                 assert mode == 'w', \
                     'Use keyword argument stream=... or filename=... in ' \
                     'loader function.'
-                sout = StringIO()
+
+                sout = BytesIO()
                 f(stream=sout, *args, **kwargs)
-                return sout.getvalue()
+                return sout.getvalue().decode('utf-8')
 
         return g
+
     return wrap
 
 
-class TimeStrError(Exception):
-    pass
-
-
-class FractionalSecondsMissing(TimeStrError):
-    '''
-    Exception raised by :py:func:`str_to_time` when the given string lacks
-    fractional seconds.
-    '''
-    pass
-
-
-class FractionalSecondsWrongNumberOfDigits(TimeStrError):
-    '''
-    Exception raised by :py:func:`str_to_time` when the given string has an
-    incorrect number of digits in the fractional seconds part.
-    '''
-    pass
-
-
-def _endswith_n(s, endings):
-    for ix, x in enumerate(endings):
-        if s.endswith(x):
-            return ix
-    return -1
-
-
-def str_to_time(s, format='%Y-%m-%d %H:%M:%S.OPTFRAC'):
-    '''
-    Convert string representing UTC time to floating point system time.
-
-    :param s: string representing UTC time
-    :param format: time string format
-    :returns: system time stamp as floating point value
-
-    Uses the semantics of :py:func:`time.strptime` but allows for fractional
-    seconds. If the format ends with ``'.FRAC'``, anything after a dot is
-    interpreted as fractional seconds. If the format ends with ``'.OPTFRAC'``,
-    the fractional part, including the dot is made optional. The latter has the
-    consequence, that the time strings and the format may not contain any other
-    dots. If the format ends with ``'.xFRAC'`` where x is 1, 2, or 3, it is
-    ensured, that exactly that number of digits are present in the fractional
-    seconds.
-    '''
-
-    if util_ext is not None:
-        try:
-            t, tfrac = util_ext.stt(s, format)
-        except util_ext.UtilExtError, e:
-            raise TimeStrError(
-                '%s, string=%s, format=%s' % (str(e), s, format))
-
-        return t+tfrac
-
-    fracsec = 0.
-    fixed_endings = '.FRAC', '.1FRAC', '.2FRAC', '.3FRAC'
-
-    iend = _endswith_n(format, fixed_endings)
-    if iend != -1:
-        dotpos = s.rfind('.')
-        if dotpos == -1:
-            raise FractionalSecondsMissing(
-                'string=%s, format=%s' % (s, format))
-
-        if iend > 0 and iend != (len(s)-dotpos-1):
-            raise FractionalSecondsWrongNumberOfDigits(
-                'string=%s, format=%s' % (s, format))
-
-        format = format[:-len(fixed_endings[iend])]
-        fracsec = float(s[dotpos:])
-        s = s[:dotpos]
-
-    elif format.endswith('.OPTFRAC'):
-        dotpos = s.rfind('.')
-        format = format[:-8]
-        if dotpos != -1 and len(s[dotpos:]) > 1:
-            fracsec = float(s[dotpos:])
-
-        if dotpos != -1:
-            s = s[:dotpos]
-
-    try:
-        return calendar.timegm(time.strptime(s, format)) + fracsec
-    except ValueError, e:
-        raise TimeStrError('%s, string=%s, format=%s' % (str(e), s, format))
-
-
-stt = str_to_time
-
-
-def time_to_str(t, format='%Y-%m-%d %H:%M:%S.3FRAC'):
-    '''
-    Get string representation for floating point system time.
-
-    :param t: floating point system time
-    :param format: time string format
-    :returns: string representing UTC time
-
-    Uses the semantics of :py:func:`time.strftime` but additionally allows for
-    fractional seconds. If ``format`` contains ``'.xFRAC'``, where ``x`` is a
-    digit between 1 and 9, this is replaced with the fractional part of ``t``
-    with ``x`` digits precision.
-    '''
-
-    if isinstance(format, int):
-        format = '%Y-%m-%d %H:%M:%S.'+str(format)+'FRAC'
-
-    if util_ext is not None:
-        t0 = math.floor(t)
-        try:
-            return util_ext.tts(int(t0), t - t0, format)
-        except util_ext.UtilExtError, e:
-            raise TimeStrError(
-                '%s, timestamp=%f, format=%s' % (str(e), t, format))
-
-    ts = float(math.floor(t))
-    tfrac = t-ts
-
-    m = re_frac.search(format)
-    if m:
-        sfrac = (frac_formats[m.group(0)] % tfrac)
-        if sfrac[0] == '1':
-            ts += 1.
-
-        format, nsub = re_frac.subn(sfrac[1:], format, 1)
-
-    return time.strftime(format, time.gmtime(ts))
-
-
-tts = time_to_str
-
-
-class Defer:
+class Defer(object):
     def __init__(self, classname, *args, **kwargs):
         global g_iprop
         if kwargs.get('position', None) is None:
@@ -273,7 +299,7 @@ class Defer:
 class TBase(object):
 
     strict = False
-    multivalued = False
+    multivalued = None
     force_regularize = False
     propnames = []
 
@@ -291,6 +317,7 @@ class TBase(object):
             optional=False,
             xmlstyle='element',
             xmltagname=None,
+            xmlns=None,
             help=None,
             position=None):
 
@@ -302,18 +329,27 @@ class TBase(object):
 
         g_iprop += 1
         self._default = default
+        if isinstance(self._default, DefaultMaker):
+            self._default_cmp = self._default.make()
+        else:
+            self._default_cmp = self._default
+
         self.optional = optional
         self.name = None
         self._xmltagname = xmltagname
+        self._xmlns = xmlns
         self.parent = None
         self.xmlstyle = xmlstyle
         self.help = help
 
     def default(self):
-        if isinstance(self._default, DefaultMaker):
-            return self._default.make()
+        return make_default(self._default)
+
+    def is_default(self, val):
+        if self._default_cmp is None:
+            return val is None
         else:
-            return self._default
+            return self._default_cmp == val
 
     def has_default(self):
         return self._default is not None
@@ -326,13 +362,24 @@ class TBase(object):
         else:
             return '?'
 
+    def set_xmlns(self, xmlns):
+        if self._xmlns is None and not self.xmlns:
+            self._xmlns = xmlns
+
+        if self.multivalued:
+            self.content_t.set_xmlns(xmlns)
+
+    def get_xmlns(self):
+        return self._xmlns or self.xmlns
+
     def get_xmltagname(self):
         if self._xmltagname is not None:
-            return self._xmltagname
+            return self.get_xmlns() + ' ' + self._xmltagname
         elif self.name:
-            return make_xmltagname_from_name(self.name)
+            return self.get_xmlns() + ' ' \
+                + make_xmltagname_from_name(self.name)
         elif self.xmltagname:
-            return self.xmltagname
+            return self.get_xmlns() + ' ' + self.xmltagname
         else:
             assert False
 
@@ -357,10 +404,11 @@ class TBase(object):
             del cls.xmltagname_to_name_multivalued[
                 prop.content_t.effective_xmltagname]
 
-        if cls.content_property == prop:
+        if cls.content_property is prop:
             cls.content_property = None
 
         cls.properties.remove(prop)
+        cls.propnames.remove(name)
 
         return prop
 
@@ -369,6 +417,7 @@ class TBase(object):
 
         prop.instance = prop
         prop.name = name
+        prop.set_xmlns(cls.xmlns)
 
         if isinstance(prop, Choice.T):
             for tc in prop.choices:
@@ -414,12 +463,12 @@ class TBase(object):
 
     @classmethod
     def ipropvals_to_save(cls, val, xmlmode=False):
-
         for prop in cls.properties:
             v = getattr(val, prop.name)
             if v is not None and (
                     not (prop.optional or (prop.multivalued and not v))
-                    or prop.default() != v):
+                    or (not prop.is_default(v))):
+
                 if xmlmode:
                     yield prop, prop.to_save_xml(v)
                 else:
@@ -446,6 +495,7 @@ class TBase(object):
                     raise ArgumentError(
                         'Unexpectedly found more than one child element "%s" '
                         'within "%s".' % (k, cls.tagname))
+
                 d[k2] = v
             elif k is None:
                 if cls.content_property:
@@ -465,6 +515,7 @@ class TBase(object):
 
         is_derived = isinstance(val, self.cls)
         is_exact = type(val) == self.cls
+
         not_ok = not self.strict and not is_derived or \
             self.strict and not is_exact
 
@@ -472,7 +523,7 @@ class TBase(object):
             if regularize:
                 try:
                     val = self.regularize_extra(val)
-                except (RegularizationError, ValueError):
+                except ValueError:
                     raise ValidationError(
                         '%s: could not convert "%s" to type %s' % (
                             self.xname(), val, self.cls.__name__))
@@ -482,7 +533,10 @@ class TBase(object):
                         self.xname(), val, type(val), self.cls.__name__))
 
         validator = self
-        if type(val) != self.cls and isinstance(val, self.cls):
+        if type(val) != self.cls \
+                and isinstance(val, self.cls) and \
+                hasattr(val, 'T'):
+            # derived classes only: validate with derived class validator
             validator = val.T.instance
 
         validator.validate_extra(val)
@@ -554,8 +608,8 @@ class TBase(object):
             if hasattr(base, 'T'):
                 baseprops.extend(base.T.properties)
 
-        l = []
-        l.append('')
+        hlp = []
+        hlp.append('')
         for prop in cls.properties:
             if prop in baseprops:
                 continue
@@ -570,15 +624,15 @@ class TBase(object):
             if d is not None:
                 descr.append('*default:* ``%s``' % repr(d))
 
-            l.append('    .. py:attribute:: %s' % prop.name)
-            l.append('')
-            l.append('      %s' % ', '.join(descr))
-            l.append('')
+            hlp.append('    .. py:gattribute:: %s' % prop.name)
+            hlp.append('')
+            hlp.append('      %s' % ', '.join(descr))
+            hlp.append('      ')
             if prop.help is not None:
-                l.append('      %s' % prop.help)
-                l.append('')
+                hlp.append('      %s' % prop.help)
+                hlp.append('')
 
-        return '\n'.join(l)
+        return '\n'.join(hlp)
 
     @classmethod
     def class_help_string(cls):
@@ -586,7 +640,7 @@ class TBase(object):
 
     @classmethod
     def class_signature(cls):
-        l = []
+        r = []
         for prop in cls.properties:
             d = prop.default()
             if d is not None:
@@ -598,9 +652,9 @@ class TBase(object):
             else:
                 arg = '...'
 
-            l.append('%s=%s' % (prop.name, arg))
+            r.append('%s=%s' % (prop.name, arg))
 
-        return '(%s)' % ', '.join(l)
+        return '(%s)' % ', '.join(r)
 
     @classmethod
     def help(cls):
@@ -637,6 +691,17 @@ class ObjectMetaClass(type):
                 T.xmltagname = classname
 
             mod = sys.modules[cls.__module__]
+
+            if hasattr(cls, 'xmlns'):
+                T.xmlns = cls.xmlns
+            elif hasattr(mod, 'guts_xmlns'):
+                T.xmlns = mod.guts_xmlns
+            else:
+                T.xmlns = ''
+
+            if T.xmlns and hasattr(cls, 'guessable_xmlns'):
+                g_guessable_xmlns[T.xmltagname] = cls.guessable_xmlns
+
             if hasattr(mod, 'guts_prefix'):
                 if mod.guts_prefix:
                     T.tagname = mod.guts_prefix + '.' + classname
@@ -692,7 +757,7 @@ class ObjectMetaClass(type):
 
             g_tagname_to_class[T.tagname] = cls
             if hasattr(cls, 'xmltagname'):
-                g_xmltagname_to_class[T.xmltagname] = cls
+                g_xmltagname_to_class[T.xmlns + ' ' + T.xmltagname] = cls
 
             cls.T = T
             T.instance = T()
@@ -712,12 +777,17 @@ class ValidationError(Exception):
     pass
 
 
-class RegularizationError(Exception):
-    pass
-
-
 class ArgumentError(Exception):
     pass
+
+
+def make_default(x):
+    if isinstance(x, DefaultMaker):
+        return x.make()
+    elif isinstance(x, Object):
+        return clone(x)
+    else:
+        return x
 
 
 class DefaultMaker(object):
@@ -727,11 +797,26 @@ class DefaultMaker(object):
         self.kwargs = kwargs
 
     def make(self):
-        return self.cls(*self.args, **self.kwargs)
+        return self.cls(
+            *[make_default(x) for x in self.args],
+            **dict((k, make_default(v)) for (k, v) in self.kwargs.items()))
 
 
-class Object(object):
-    __metaclass__ = ObjectMetaClass
+def with_metaclass(meta, *bases):
+    # inlined py2/py3 compat solution from python-future
+    class metaclass(meta):
+        __call__ = type.__call__
+        __init__ = type.__init__
+
+        def __new__(cls, name, this_bases, d):
+            if this_bases is None:
+                return type.__new__(cls, name, (), d)
+            return meta(name, bases, d)
+
+    return metaclass('temp', None, {})
+
+
+class Object(with_metaclass(ObjectMetaClass, object)):
     dummy_for = None
 
     def __init__(self, **kwargs):
@@ -751,7 +836,7 @@ class Object(object):
 
         if kwargs:
             raise ArgumentError('Invalid argument to %s: %s' % (
-                self.T.tagname, ', '.join(kwargs.keys())))
+                self.T.tagname, ', '.join(list(kwargs.keys()))))
 
     @classmethod
     def D(cls, *args, **kwargs):
@@ -766,26 +851,49 @@ class Object(object):
     def dump(self, stream=None, filename=None, header=False):
         return dump(self, stream=stream, filename=filename, header=header)
 
-    def dump_xml(self, stream=None, filename=None, header=False):
-        return dump_xml(self, stream=stream, filename=filename, header=header)
+    def dump_xml(
+            self, stream=None, filename=None, header=False, ns_ignore=False):
+        return dump_xml(
+            self, stream=stream, filename=filename, header=header,
+            ns_ignore=ns_ignore)
 
     @classmethod
     def load(cls, stream=None, filename=None, string=None):
         return load(stream=stream, filename=filename, string=string)
 
     @classmethod
-    def load_xml(cls, stream=None, filename=None, string=None):
-        return load_xml(stream=stream, filename=filename, string=string)
+    def load_xml(cls, stream=None, filename=None, string=None, ns_hints=None,
+                 ns_ignore=False):
+
+        if ns_hints is None:
+            ns_hints = [cls.T.instance.get_xmlns()]
+
+        return load_xml(
+            stream=stream,
+            filename=filename,
+            string=string,
+            ns_hints=ns_hints,
+            ns_ignore=ns_ignore)
 
     def __str__(self):
         return self.dump()
+
+
+def to_dict(obj):
+    '''
+    Get dict of guts object attributes.
+
+    :param obj: :py:class`Object` object
+    '''
+
+    return dict(obj.T.inamevals(obj))
 
 
 class SObject(Object):
 
     class __T(TBase):
         def regularize_extra(self, val):
-            if isinstance(val, basestring):
+            if isinstance(val, (str, newstr)):
                 return self.cls(val)
 
             return val
@@ -858,7 +966,7 @@ class Bool(Object):
         strict = True
 
         def regularize_extra(self, val):
-            if isinstance(val, basestring):
+            if isinstance(val, (str, newstr)):
                 if val.lower().strip() in ('0', 'false'):
                     return False
 
@@ -871,9 +979,28 @@ class Bool(Object):
 class String(Object):
     dummy_for = str
 
+    class __T(TBase):
+        def __init__(self, *args, **kwargs):
+            yamlstyle = kwargs.pop('yamlstyle', None)
+            TBase.__init__(self, *args, **kwargs)
+            self.style_cls = str_style_map[yamlstyle]
+
+        def to_save(self, val):
+            return self.style_cls(val)
+
 
 class Unicode(Object):
-    dummy_for = unicode
+    dummy_for = newstr
+
+    class __T(TBase):
+        def __init__(self, *args, **kwargs):
+            yamlstyle = kwargs.pop('yamlstyle', None)
+            TBase.__init__(self, *args, **kwargs)
+            self.style_cls = unicode_style_map[yamlstyle]
+
+        def to_save(self, val):
+            return self.style_cls(val)
+
 
 guts_plain_dummy_types = (String, Unicode, Int, Float, Complex, Bool)
 
@@ -882,7 +1009,7 @@ class Dict(Object):
     dummy_for = dict
 
     class __T(TBase):
-        multivalued = True
+        multivalued = dict
 
         def __init__(self, key_t=Any.T(), content_t=Any.T(), *args, **kwargs):
             TBase.__init__(self, *args, **kwargs)
@@ -894,7 +1021,10 @@ class Dict(Object):
 
         def default(self):
             if self._default is not None:
-                return self._default
+                return dict(
+                    (make_default(k), make_default(v))
+                    for (k, v) in self._default.items())
+
             if self.optional:
                 return None
             else:
@@ -907,7 +1037,7 @@ class Dict(Object):
             return TBase.validate(self, val, regularize, depth+1)
 
         def validate_children(self, val, regularize, depth):
-            for key, ele in val.items():
+            for key, ele in list(val.items()):
                 newkey = self.key_t.validate(key, regularize, depth-1)
                 newele = self.content_t.validate(ele, regularize, depth-1)
                 if regularize:
@@ -919,12 +1049,12 @@ class Dict(Object):
 
         def to_save(self, val):
             return dict((self.key_t.to_save(k), self.content_t.to_save(v))
-                        for (k, v) in val.iteritems())
+                        for (k, v) in val.items())
 
         def to_save_xml(self, val):
             raise NotImplementedError()
 
-        def classname_for_help(self, strip_module=""):
+        def classname_for_help(self, strip_module=''):
             return '``dict`` of %s objects' % \
                 self.content_t.classname_for_help(strip_module=strip_module)
 
@@ -933,17 +1063,19 @@ class List(Object):
     dummy_for = list
 
     class __T(TBase):
-        multivalued = True
+        multivalued = list
 
         def __init__(self, content_t=Any.T(), *args, **kwargs):
+            yamlstyle = kwargs.pop('yamlstyle', None)
             TBase.__init__(self, *args, **kwargs)
             assert isinstance(content_t, TBase) or isinstance(content_t, Defer)
             self.content_t = content_t
             self.content_t.parent = self
+            self.style_cls = list_style_map[yamlstyle]
 
         def default(self):
             if self._default is not None:
-                return self._default
+                return [make_default(x) for x in self._default]
             if self.optional:
                 return None
             else:
@@ -964,7 +1096,7 @@ class List(Object):
             return val
 
         def to_save(self, val):
-            return [self.content_t.to_save(v) for v in val]
+            return self.style_cls(self.content_t.to_save(v) for v in val)
 
         def to_save_xml(self, val):
             return [self.content_t.to_save_xml(v) for v in val]
@@ -985,19 +1117,19 @@ class List(Object):
 
 
 def make_typed_list_class(t):
-    class O(List):
+    class TL(List):
         class __T(List.T):
             def __init__(self, *args, **kwargs):
                 List.T.__init__(self, content_t=t.T(), *args, **kwargs)
 
-    return O
+    return TL
 
 
 class Tuple(Object):
     dummy_for = tuple
 
     class __T(TBase):
-        multivalued = True
+        multivalued = tuple
 
         def __init__(self, n=None, content_t=Any.T(), *args, **kwargs):
             TBase.__init__(self, *args, **kwargs)
@@ -1008,13 +1140,15 @@ class Tuple(Object):
 
         def default(self):
             if self._default is not None:
-                return self._default
+                return tuple(
+                    make_default(x) for x in self._default)
+
             elif self.optional:
                 return None
             else:
                 if self.n is not None:
                     return tuple(
-                        self.content_t.default() for x in xrange(self.n))
+                        self.content_t.default() for x in range(self.n))
                 else:
                     return tuple()
 
@@ -1028,8 +1162,6 @@ class Tuple(Object):
             if self.n is not None and len(val) != self.n:
                 raise ValidationError(
                     '%s should have length %i' % (self.xname(), self.n))
-
-            return val
 
         def validate_children(self, val, regularize, depth):
             if not regularize:
@@ -1068,6 +1200,9 @@ class Tuple(Object):
                         strip_module=strip_module))
 
 
+re_tz = re.compile(r'(Z|([+-][0-2][0-9])(:?([0-5][0-9]))?)$')
+
+
 class Timestamp(Object):
     dummy_for = float
 
@@ -1082,19 +1217,34 @@ class Timestamp(Object):
                 tt = val.timetuple()
                 val = float(calendar.timegm(tt))
 
-            elif isinstance(val, str) or isinstance(val, unicode):
+            elif isinstance(val, (str, newstr)):
                 val = val.strip()
-                val = re.sub(r'(Z|\+00(:?00)?)$', '', val)
-                if val[10] == 'T':
+                tz_offset = 0
+
+                m = re_tz.search(val)
+                if m:
+                    sh = m.group(2)
+                    sm = m.group(4)
+                    tz_offset = (int(sh)*3600 if sh else 0) \
+                        + (int(sm)*60 if sm else 0)
+
+                    val = re_tz.sub('', val)
+
+                if len(val) > 10 and val[10] == 'T':
                     val = val.replace('T', ' ', 1)
-                val = str_to_time(val)
+
+                try:
+                    val = str_to_time(val) - tz_offset
+                except TimeStrError:
+                    raise ValidationError(
+                        '%s: cannot parse time/date: %s' % (self.xname(), val))
 
             elif isinstance(val, int):
                 val = float(val)
 
             else:
-                raise ValidationError('%s: cannot convert "%s" to float' % (
-                    self.xname(), val))
+                raise ValidationError(
+                    '%s: cannot convert "%s" to float' % (self.xname(), val))
 
             return val
 
@@ -1115,10 +1265,14 @@ class DateTimestamp(Object):
                 tt = val.utctimetuple()
                 val = calendar.timegm(tt) + val.microsecond * 1e-6
 
-            elif isinstance(val, str) or isinstance(val, unicode):
+            elif isinstance(val, datetime.date):
+                tt = val.timetuple()
+                val = float(calendar.timegm(tt))
+
+            elif isinstance(val, (str, newstr)):
                 val = str_to_time(val, format='%Y-%m-%d')
 
-            if not isinstance(val, float):
+            elif isinstance(val, int):
                 val = float(val)
 
             return val
@@ -1137,9 +1291,9 @@ class StringPattern(String):
     dummy_for = str
     pattern = '.*'
 
-    class __T(TBase):
+    class __T(String.T):
         def __init__(self, pattern=None, *args, **kwargs):
-            TBase.__init__(self, *args, **kwargs)
+            String.T.__init__(self, *args, **kwargs)
 
             if pattern is not None:
                 self.pattern = pattern
@@ -1163,7 +1317,7 @@ class UnicodePattern(Unicode):
 
     '''Any ``unicode`` matching pattern ``%(pattern)s``.'''
 
-    dummy_for = unicode
+    dummy_for = newstr
     pattern = '.*'
 
     class __T(TBase):
@@ -1196,9 +1350,9 @@ class StringChoice(String):
     choices = []
     ignore_case = False
 
-    class __T(TBase):
+    class __T(String.T):
         def __init__(self, choices=None, ignore_case=None, *args, **kwargs):
-            TBase.__init__(self, *args, **kwargs)
+            String.T.__init__(self, *args, **kwargs)
 
             if choices is not None:
                 self.choices = choices
@@ -1244,13 +1398,14 @@ class Union(Object):
 
         def validate(self, val, regularize=False, depth=-1):
             assert self.members
+            e2 = None
             for member in self.members:
                 try:
                     return member.validate(val, regularize, depth=depth)
-                except ValidationError, e:
-                    pass
+                except ValidationError as e:
+                    e2 = e
 
-            raise e
+            raise e2
 
 
 class Choice(Object):
@@ -1277,6 +1432,7 @@ class Choice(Object):
                 is_exact = type(val) == tc.cls
                 if not (not tc.strict and not is_derived or
                         tc.strict and not is_exact):
+
                     t = tc
                     break
 
@@ -1289,7 +1445,7 @@ class Choice(Object):
                             ok = True
                             t = tc
                             break
-                        except (RegularizationError, ValueError):
+                        except (ValidationError, ValueError):
                             pass
 
                     if not ok:
@@ -1315,36 +1471,49 @@ class Choice(Object):
             return val
 
         def extend_xmlelements(self, elems, v):
-            elems.append((self.cls_to_xmltagname[type(v)], v))
+            elems.append((
+                self.cls_to_xmltagname[type(v)].split(' ', 1)[-1], v))
 
 
-def _dump(object, stream, header=False, _dump_function=yaml.dump):
+def _dump(
+        object, stream,
+        header=False,
+        Dumper=GutsSafeDumper,
+        _dump_function=yaml.dump):
+
+    if not getattr(stream, 'encoding', None):
+        enc = encode_utf8
+    else:
+        enc = no_encode
 
     if header:
-        stream.write('%YAML 1.1\n')
-        if isinstance(header, basestring):
-            banner = '\n'.join('# ' + x for x in header.splitlines())
-            stream.write(banner)
-            stream.write('\n')
+        stream.write(enc(u'%YAML 1.1\n'))
+        if isinstance(header, (str, newstr)):
+            banner = u'\n'.join('# ' + x for x in header.splitlines()) + '\n'
+            stream.write(enc(banner))
 
     _dump_function(
-        object, stream=stream, explicit_start=True, Dumper=SafeDumper)
+        object,
+        stream=stream,
+        encoding='utf-8',
+        explicit_start=True,
+        Dumper=Dumper)
 
 
-def _dump_all(object, stream, header=True):
+def _dump_all(object, stream, header=True, Dumper=GutsSafeDumper):
     _dump(object, stream=stream, header=header, _dump_function=yaml.dump_all)
 
 
-def _load(stream):
-    return yaml.load(stream=stream, Loader=SafeLoader)
+def _load(stream, Loader=GutsSafeLoader):
+    return yaml.load(stream=stream, Loader=Loader)
 
 
-def _load_all(stream):
-    return list(yaml.load_all(stream=stream, Loader=SafeLoader))
+def _load_all(stream, Loader=GutsSafeLoader):
+    return list(yaml.load_all(stream=stream, Loader=Loader))
 
 
-def _iload_all(stream):
-    return yaml.load_all(stream=stream, Loader=SafeLoader)
+def _iload_all(stream, Loader=GutsSafeLoader):
+    return yaml.load_all(stream=stream, Loader=Loader)
 
 
 def multi_representer(dumper, data):
@@ -1354,10 +1523,20 @@ def multi_representer(dumper, data):
     return node
 
 
+# hack for compatibility with early GF Store versions
+re_compatibility = re.compile(
+    r'^pyrocko\.(trace|gf\.(meta|seismosizer)|fomosto\.'
+    r'(dummy|poel|qseis|qssp))\.'
+)
+
+
 def multi_constructor(loader, tag_suffix, node):
     tagname = str(tag_suffix)
+
+    tagname = re_compatibility.sub('pf.', tagname)
+
     cls = g_tagname_to_class[tagname]
-    kwargs = dict(loader.construct_mapping(node, deep=True).iteritems())
+    kwargs = dict(iter(loader.construct_pairs(node, deep=True)))
     o = cls(**kwargs)
     o.validate(regularize=True, depth=1)
     return o
@@ -1367,68 +1546,104 @@ def dict_noflow_representer(dumper, data):
     return dumper.represent_mapping(
         'tag:yaml.org,2002:map', data, flow_style=False)
 
-yaml.add_multi_representer(Object, multi_representer, Dumper=SafeDumper)
-yaml.add_multi_constructor('!', multi_constructor, Loader=SafeLoader)
-yaml.add_representer(dict, dict_noflow_representer, Dumper=SafeDumper)
+
+yaml.add_multi_representer(Object, multi_representer, Dumper=GutsSafeDumper)
+yaml.add_multi_constructor('!', multi_constructor, Loader=GutsSafeLoader)
+yaml.add_representer(dict, dict_noflow_representer, Dumper=GutsSafeDumper)
+
+
+def newstr_representer(dumper, data):
+    return dumper.represent_scalar(
+        'tag:yaml.org,2002:str', unicode(data))
+
+
+yaml.add_representer(newstr, newstr_representer, Dumper=GutsSafeDumper)
 
 
 class Constructor(object):
-    def __init__(self, add_namespace_maps=False, strict=False):
+    def __init__(self, add_namespace_maps=False, strict=False, ns_hints=None,
+                 ns_ignore=False):
+
         self.stack = []
         self.queue = []
-        self.namespaces = {}
-        self.namespaces_rev = {}
+        self.namespaces = defaultdict(list)
         self.add_namespace_maps = add_namespace_maps
         self.strict = strict
+        self.ns_hints = ns_hints
+        self.ns_ignore = ns_ignore
 
-    def start_element(self, name, attrs):
-        name = name.split()[-1]
-        if self.stack and self.stack[-1][1] is not None:
-            cls = self.stack[-1][1].T.xmltagname_to_class.get(name, None)
-            if cls is not None and (
-                    not issubclass(cls, Object) or issubclass(cls, SObject)):
-                cls = None
+    def start_element(self, ns_name, attrs):
+        if self.ns_ignore:
+            ns_name = ns_name.split(' ')[-1]
+
+        if -1 == ns_name.find(' '):
+            if self.ns_hints is None and ns_name in g_guessable_xmlns:
+                self.ns_hints = g_guessable_xmlns[ns_name]
+
+            if self.ns_hints:
+                ns_names = [
+                    ns_hint + ' ' + ns_name for ns_hint in self.ns_hints]
+
+            elif self.ns_hints is None:
+                ns_names = [' ' + ns_name]
+
         else:
-            cls = g_xmltagname_to_class.get(name, None)
+            ns_names = [ns_name]
 
-        self.stack.append((name, cls, attrs, [], []))
+        for ns_name in ns_names:
+            if self.stack and self.stack[-1][1] is not None:
+                cls = self.stack[-1][1].T.xmltagname_to_class.get(
+                    ns_name, None)
 
-    def end_element(self, name):
-        name = name.split()[-1]
-        name, cls, attrs, content2, content1 = self.stack.pop()
+                if cls is not None and (
+                        not issubclass(cls, Object)
+                        or issubclass(cls, SObject)):
+                    cls = None
+            else:
+                cls = g_xmltagname_to_class.get(ns_name, None)
+
+            if cls:
+                break
+
+        self.stack.append((ns_name, cls, attrs, [], []))
+
+    def end_element(self, _):
+        ns_name, cls, attrs, content2, content1 = self.stack.pop()
+
+        ns = ns_name.split(' ', 1)[0]
 
         if cls is not None:
-            content2.extend(x for x in attrs.iteritems())
+            content2.extend(
+                (ns + ' ' + k if -1 == k.find(' ') else k, v)
+                for (k, v) in attrs.items())
             content2.append((None, ''.join(content1)))
             o = cls(**cls.T.translate_from_xml(content2, self.strict))
             o.validate(regularize=True, depth=1)
             if self.add_namespace_maps:
-                o.namespace_map = dict(self.namespaces)
+                o.namespace_map = self.get_current_namespace_map()
 
             if self.stack and not all(x[1] is None for x in self.stack):
-                self.stack[-1][-2].append((name, o))
+                self.stack[-1][-2].append((ns_name, o))
             else:
                 self.queue.append(o)
         else:
             content = [''.join(content1)]
             if self.stack:
                 for c in content:
-                    self.stack[-1][-2].append((name, c))
+                    self.stack[-1][-2].append((ns_name, c))
 
     def characters(self, char_content):
         if self.stack:
             self.stack[-1][-1].append(char_content)
 
     def start_namespace(self, ns, uri):
-        assert ns not in self.namespaces
-        assert uri not in self.namespaces_rev
-
-        self.namespaces[ns] = uri
-        self.namespaces_rev[uri] = ns
+        self.namespaces[ns].append(uri)
 
     def end_namespace(self, ns):
-        del self.namespaces_rev[self.namespaces[ns]]
-        del self.namespaces[ns]
+        self.namespaces[ns].pop()
+
+    def get_current_namespace_map(self):
+        return dict((k, v[-1]) for (k, v) in self.namespaces.items() if v)
 
     def get_queued_elements(self):
         queue = self.queue
@@ -1438,13 +1653,21 @@ class Constructor(object):
 
 def _iload_all_xml(
         stream,
-        bufsize=100000, add_namespace_maps=False, strict=False):
+        bufsize=100000,
+        add_namespace_maps=False,
+        strict=False,
+        ns_hints=None,
+        ns_ignore=False):
 
     from xml.parsers.expat import ParserCreate
 
-    parser = ParserCreate(namespace_separator=' ')
+    parser = ParserCreate('UTF-8', namespace_separator=' ')
 
-    handler = Constructor(add_namespace_maps=add_namespace_maps, strict=strict)
+    handler = Constructor(
+        add_namespace_maps=add_namespace_maps,
+        strict=strict,
+        ns_hints=ns_hints,
+        ns_ignore=ns_ignore)
 
     parser.StartElementHandler = handler.start_element
     parser.EndElementHandler = handler.end_element
@@ -1468,47 +1691,75 @@ def _load_all_xml(*args, **kwargs):
 
 def _load_xml(*args, **kwargs):
     g = _iload_all_xml(*args, **kwargs)
-    return g.next()
+    return next(g)
 
 
 def _dump_all_xml(objects, stream, root_element_name='root', header=True):
 
+    if not getattr(stream, 'encoding', None):
+        enc = encode_utf8
+    else:
+        enc = no_encode
+
     _dump_xml_header(stream, header)
 
-    beg = '<%s>\n' % root_element_name
-    end = '</%s>\n' % root_element_name
+    beg = u'<%s>\n' % root_element_name
+    end = u'</%s>\n' % root_element_name
 
-    stream.write(beg)
+    stream.write(enc(beg))
 
-    for object in objects:
-        _dump_xml(object, stream=stream)
+    for ob in objects:
+        _dump_xml(ob, stream=stream)
 
-    stream.write(end)
+    stream.write(enc(end))
 
 
 def _dump_xml_header(stream, banner=None):
 
-    stream.write('<?xml version="1.0" encoding="UTF-8" ?>\n')
-    if isinstance(banner, basestring):
-        stream.write('<!-- ')
-        stream.write(banner)
-        stream.write(' -->\n')
+    if not getattr(stream, 'encoding', None):
+        enc = encode_utf8
+    else:
+        enc = no_encode
+
+    stream.write(enc(u'<?xml version="1.0" encoding="UTF-8" ?>\n'))
+    if isinstance(banner, (str, newstr)):
+        stream.write(enc(u'<!-- %s -->\n' % banner))
 
 
-def _dump_xml(obj, stream, depth=0, xmltagname=None, header=False):
+def _dump_xml(
+        obj, stream, depth=0, ns_name=None, header=False, ns_map=[],
+        ns_ignore=False):
+
     from xml.sax.saxutils import escape, quoteattr
+
+    if not getattr(stream, 'encoding', None):
+        enc = encode_utf8
+    else:
+        enc = no_encode
 
     if depth == 0 and header:
         _dump_xml_header(stream, header)
 
     indent = ' '*depth*2
-    if xmltagname is None:
-        xmltagname = obj.T.xmltagname
+    if ns_name is None:
+        ns_name = obj.T.instance.get_xmltagname()
+
+    if -1 != ns_name.find(' '):
+        ns, name = ns_name.split(' ')
+    else:
+        ns, name = '', ns_name
 
     if isinstance(obj, Object):
         obj.validate(depth=1)
         attrs = []
         elems = []
+
+        added_ns = False
+        if not ns_ignore and ns and (not ns_map or ns_map[-1] != ns):
+            attrs.append(('xmlns', ns))
+            ns_map.append(ns)
+            added_ns = True
+
         for prop, v in obj.T.ipropvals_to_save(obj, xmlmode=True):
             if prop.xmlstyle == 'attribute':
                 assert not prop.multivalued
@@ -1526,30 +1777,37 @@ def _dump_xml(obj, stream, depth=0, xmltagname=None, header=False):
         attr_str = ''
         if attrs:
             attr_str = ' ' + ' '.join(
-                '%s=%s' % (k, quoteattr(str(v))) for (k, v) in attrs)
+                '%s=%s' % (k.split(' ')[-1], quoteattr(str(v)))
+                for (k, v) in attrs)
 
         if not elems:
-            stream.write('%s<%s%s />\n' % (indent, xmltagname, attr_str))
+            stream.write(enc(u'%s<%s%s />\n' % (indent, name, attr_str)))
         else:
             oneline = len(elems) == 1 and elems[0][0] is None
-            stream.write(u'%s<%s%s>%s' % (
-                indent, xmltagname, attr_str, ('\n', '')[oneline]))
+            stream.write(enc(u'%s<%s%s>%s' % (
+                indent,
+                name,
+                attr_str,
+                '' if oneline else '\n')))
 
             for (k, v) in elems:
                 if k is None:
-                    stream.write(
-                        '%s' % escape(unicode(v), {'\0': '&#00;'})
-                        .encode('utf8'))
+                    stream.write(enc(escape(newstr(v), {'\0': '&#00;'})))
                 else:
-                    _dump_xml(v, stream=stream, depth=depth+1, xmltagname=k)
+                    _dump_xml(v, stream,  depth+1, k, False, ns_map, ns_ignore)
 
-            stream.write('%s</%s>\n' % ((indent, '')[oneline], xmltagname))
+            stream.write(enc(u'%s</%s>\n' % (
+                '' if oneline else indent, name)))
+
+        if added_ns:
+            ns_map.pop()
+
     else:
-        stream.write('%s<%s>%s</%s>\n' % (
+        stream.write(enc(u'%s<%s>%s</%s>\n' % (
             indent,
-            xmltagname,
-            escape(unicode(obj), {'\0': '&#00;'}).encode('utf8'),
-            xmltagname))
+            name,
+            escape(newstr(obj), {'\0': '&#00;'}),
+            name)))
 
 
 def walk(x, typ=None, path=()):
@@ -1565,8 +1823,195 @@ def walk(x, typ=None, path=()):
                                       path=path + ((prop.name, iele),)):
                             yield y
             else:
-                for y in walk(val, typ, path=path + (prop.name,)):
+                for y in walk(val, typ, path=path+(prop.name,)):
                     yield y
+
+
+def clone(x, pool=None):
+    '''
+    Clone guts object tree.
+
+    Traverses guts object tree and recursively clones all guts attributes,
+    falling back to :py:func:`copy.deepcopy` for non-guts objects. Objects
+    deriving from :py:class:`Object` are instantiated using their respective
+    init function. Multiply referenced objects in the source tree are multiply
+    referenced also in the destination tree.
+
+    This function can be used to clone guts objects ignoring any contained
+    run-time state, i.e. any of their attributes not defined as a guts
+    property.
+    '''
+
+    if pool is None:
+        pool = {}
+
+    if id(x) in pool:
+        x_copy = pool[id(x)]
+
+    else:
+        if isinstance(x, Object):
+            d = {}
+            for (prop, y) in x.T.ipropvals(x):
+                if y is not None:
+                    if not prop.multivalued:
+                        y_copy = clone(y, pool)
+                    elif prop.multivalued is dict:
+                        y_copy = dict(
+                            (clone(zk, pool), clone(zv, pool))
+                            for (zk, zv) in y.items())
+                    else:
+                        y_copy = type(y)(clone(z, pool) for z in y)
+                else:
+                    y_copy = y
+
+                d[prop.name] = y_copy
+
+            x_copy = x.__class__(**d)
+
+        else:
+            x_copy = copy.deepcopy(x)
+
+    pool[id(x)] = x_copy
+    return x_copy
+
+
+class YPathError(Exception):
+    '''This exception is raised for invalid ypath specifications.'''
+    pass
+
+
+def _parse_yname(yname):
+    ident = r'[a-zA-Z][a-zA-Z0-9_]*'
+    rint = r'-?[0-9]+'
+    m = re.match(
+        r'^(%s)(\[((%s)?(:)(%s)?|(%s))\])?$'
+        % (ident, rint, rint, rint), yname)
+
+    if not m:
+        raise YPathError('Syntax error in component: "%s"' % yname)
+
+    d = dict(
+        name=m.group(1))
+
+    if m.group(2):
+        if m.group(5):
+            istart = iend = None
+            if m.group(4):
+                istart = int(m.group(4))
+            if m.group(6):
+                iend = int(m.group(6))
+
+            d['slice'] = (istart, iend)
+        else:
+            d['index'] = int(m.group(7))
+
+    return d
+
+
+def _decend(obj, ynames):
+    if ynames:
+        for sobj in iter_elements(obj, ynames):
+            yield sobj
+    else:
+        yield obj
+
+
+def iter_elements(obj, ypath):
+    '''
+    Generator yielding elements matching a given ypath specification.
+
+    :param obj: guts :py:class:`Object` instance
+    :param ypath: Dot-separated object path (e.g. 'root.child.child').
+        To access list objects use slice notatation (e.g.
+        'root.child[:].child[1:3].child[1]').
+
+    Raises :py:exc:`YPathError` on failure.
+    '''
+
+    try:
+        if isinstance(ypath, str):
+            ynames = ypath.split('.')
+        else:
+            ynames = ypath
+
+        yname = ynames[0]
+        ynames = ynames[1:]
+        d = _parse_yname(yname)
+        if d['name'] not in obj.T.propnames:
+            raise AttributeError(d['name'])
+
+        obj = getattr(obj, d['name'])
+
+        if 'index' in d:
+            sobj = obj[d['index']]
+            for ssobj in _decend(sobj, ynames):
+                yield ssobj
+
+        elif 'slice' in d:
+            for i in range(*slice(*d['slice']).indices(len(obj))):
+                sobj = obj[i]
+                for ssobj in _decend(sobj, ynames):
+                    yield ssobj
+        else:
+            for sobj in _decend(obj, ynames):
+                yield sobj
+
+    except (AttributeError, IndexError) as e:
+        raise YPathError('Invalid ypath: "%s" (%s)' % (ypath, str(e)))
+
+
+def get_elements(obj, ypath):
+    '''
+    Get all elements matching a given ypath specification.
+
+    :param obj: guts :py:class:`Object` instance
+    :param ypath: Dot-separated object path (e.g. 'root.child.child').
+        To access list objects use slice notatation (e.g.
+        'root.child[:].child[1:3].child[1]').
+
+    Raises :py:exc:`YPathError` on failure.
+    '''
+    return list(iter_elements(obj, ypath))
+
+
+def set_elements(obj, ypath, value, validate=False, regularize=False):
+    '''
+    Set elements matching a given ypath specification.
+
+    :param obj: guts :py:class:`Object` instance
+    :param ypath: Dot-separated object path (e.g. 'root.child.child').
+        To access list objects use slice notatation (e.g.
+        'root.child[:].child[1:3].child[1]').
+    :param value: All matching elements will be set to `value`.
+    :param validate: Whether to validate affected subtrees.
+    :param regularize: Whether to regularize affected subtrees.
+
+    Raises :py:exc:`YPathError` on failure.
+    '''
+
+    ynames = ypath.split('.')
+    try:
+        d = _parse_yname(ynames[-1])
+        for sobj in iter_elements(obj, ynames[:-1]):
+            if d['name'] not in sobj.T.propnames:
+                raise AttributeError(d['name'])
+
+            if 'index' in d:
+                ssobj = getattr(sobj, d['name'])
+                ssobj[d['index']] = value
+            elif 'slice' in d:
+                ssobj = getattr(sobj, d['name'])
+                for i in range(*slice(*d['slice']).indices(len(ssobj))):
+                    ssobj[i] = value
+            else:
+                setattr(sobj, d['name'], value)
+                if regularize:
+                    sobj.regularize()
+                if validate:
+                    sobj.validate()
+
+    except (AttributeError, IndexError, YPathError) as e:
+        raise YPathError('Invalid ypath: "%s" (%s)' % (ypath, str(e)))
 
 
 def zip_walk(x, typ=None, path=(), stack=()):
