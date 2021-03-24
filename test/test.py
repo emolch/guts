@@ -1,58 +1,103 @@
+from __future__ import division, print_function, absolute_import
+
 import unittest
 import calendar
 import math
 import re
 import sys
+import datetime
+from contextlib import contextmanager
 
-sys.path[0:0] = [ '../src' ]
 
-from guts import *
+sys.path[0:0] = ['../src']
+
+from guts import StringPattern, Object, Bool, Int, Float, String, \
+    SObject, Unicode, Complex, Timestamp, DateTimestamp, StringChoice, Defer, \
+    ArgumentError, ValidationError, Any, List, Tuple, Union, Choice, Dict, \
+    load, load_string, load_xml_string, load_xml, load_all, iload_all, \
+    load_all_xml, iload_all_xml, dump, dump_xml, dump_all, dump_all_xml, \
+    make_typed_list_class, walk, zip_walk, path_to_str, clone, set_elements, \
+    get_elements, YPathError
+
+
+try:
+    unicode
+except NameError:
+    unicode = str
+
+
+guts_prefix = 'guts_test'
+
 
 class SamplePat(StringPattern):
     pattern = r'[a-z]{3}'
 
-class SampleChoice(StringChoice):
-    choices = [ 'a', 'bcd', 'efg' ]
 
-basic_types = (Bool, Int, Float, String, Unicode, Complex, Timestamp,
-        SamplePat, SampleChoice)
+class SampleChoice(StringChoice):
+    choices = ['a', 'bcd', 'efg']
+
+
+basic_types = (
+    Bool, Int, Float, String, Unicode, Complex, Timestamp, SamplePat,
+    SampleChoice)
+
 
 def tstamp(*args):
     return float(calendar.timegm(args))
 
-samples = {}
-samples[Bool] = [ True, False ]
-samples[Int] = [ 2**n for n in [1,30] ] #,31,65] ] 
-samples[Float] = [ 0., 1., math.pi, float('inf'), float('-inf'), float('nan') ]
-samples[String] = [ '', 'test', 'abc def', '<', '\n', '"', '\'', 
-        ''.join(chr(x) for x in range(32,128)) ] # chr(0) and other special chars don't work with xml...
-samples[Unicode] = [ u'aoeu \u00e4 \u0100' ]
-samples[Complex] = [ 1.0+5J, 0.0J, complex(math.pi,1.0) ]
-samples[Timestamp] = [ 0.0, 
-        tstamp(2030,1,1,0,0,0), 
-        tstamp(1960,1,1,0,0,0),
-        tstamp(2010,10,10,10,10,10) + 0.000001]
 
-samples[SamplePat] = [ 'aaa', 'zzz' ]
-samples[SampleChoice] = [ 'a', 'bcd', 'efg' ]
+samples = {}
+samples[Bool] = [True, False]
+samples[Int] = [2**n for n in [1, 30]]  # ,31,65] ]
+samples[Float] = [0., 1., math.pi, float('inf'), float('-inf'), float('nan')]
+samples[String] = [
+    '', 'test', 'abc def', '<', '\n', '"', '\'',
+    ''.join(chr(x) for x in range(32, 128))]
+# chr(0) and other special chars don't work with xml...
+
+samples[Unicode] = [u'aoeu \u00e4 \u0100']
+samples[Complex] = [1.0+5J, 0.0J, complex(math.pi, 1.0)]
+samples[Timestamp] = [
+    0.0,
+    tstamp(2030, 1, 1, 0, 0, 0),
+    tstamp(1960, 1, 1, 0, 0, 0),
+    tstamp(2010, 10, 10, 10, 10, 10) + 0.000001]
+
+samples[SamplePat] = ['aaa', 'zzz']
+samples[SampleChoice] = ['a', 'bcd', 'efg']
 
 regularize = {}
-regularize[Bool] = [ (1, True), (0, False), ('0', False), ('False', False) ]
-regularize[Int] = [ ('1', 1), (1.0, 1), (1.1, 1) ]
-regularize[Float] = [ ('1.0', 1.0), (1, 1.0), ('inf', float('inf')), ('nan', float('nan')) ]
-regularize[String] = [ (1, '1') ]
-regularize[Unicode] = [ (1, u'1') ]
-regularize[Timestamp] = [ 
-        ('2010-01-01 10:20:01', tstamp(2010,1,1,10,20,1)),
-        ('2010-01-01T10:20:01', tstamp(2010,1,1,10,20,1)),
-        ('2010-01-01T10:20:01.11Z', tstamp(2010,1,1,10,20,1)+0.11),
-        ('2030-12-12 00:00:10.11111', tstamp(2030,12,12,0,0,10)+0.11111)
+regularize[Bool] = [(1, True), (0, False), ('0', False), ('False', False)]
+regularize[Int] = [('1', 1), (1.0, 1), (1.1, 1)]
+regularize[Float] = [
+    ('1.0', 1.0),
+    (1, 1.0),
+    ('inf', float('inf')),
+    ('nan', float('nan'))]
+regularize[String] = [(1, '1')]
+regularize[Unicode] = [(1, u'1')]
+regularize[Timestamp] = [
+    ('2010-01-01 10:20:01',  tstamp(2010, 1, 1, 10, 20, 1)),
+    ('2010-01-01T10:20:01',  tstamp(2010, 1, 1, 10, 20, 1)),
+    ('2010-01-01T10:20:01.11Z',  tstamp(2010, 1, 1, 10, 20, 1)+0.11),
+    ('2030-12-12 00:00:10.11111',  tstamp(2030, 12, 12, 0, 0, 10)+0.11111),
+    (datetime.date(2010, 12, 12),  tstamp(2010, 12, 12, 0, 0, 0)),
+    (10,  10.)
+]
+regularize[DateTimestamp] = [
+    ('2010-01-01',  tstamp(2010, 1, 1, 0, 0, 0)),
+    (datetime.datetime(2010, 12, 12),  tstamp(2010, 12, 12, 0, 0, 0)),
+    (datetime.date(2010, 12, 12),  tstamp(2010, 12, 12, 0, 0, 0)),
+    (86400, 86400.)
+]
+
+regularize[Complex] = [
+    ([1., 2.], 1.0+2.0J),
+    ((1., 2.), 1.0+2.0J)
 ]
 
 
-from contextlib import contextmanager
-
-class TestGuts(unittest.TestCase):
+class GutsTestCase(unittest.TestCase):
 
     if sys.version_info < (2, 7):
 
@@ -71,10 +116,15 @@ class TestGuts(unittest.TestCase):
             assert value is None, 'expected None but got %s' % value
 
     def assertEqualNanAware(self, a, b):
-        if isinstance(a, float) and isinstance(b, float) and math.isnan(a) and math.isnan(b):
-            return 
-        
-        self.assertEqual(a,b)
+        if isinstance(a, float) \
+                and isinstance(b, float) \
+                and math.isnan(a) and math.isnan(b):
+            return
+
+        if isinstance(a, float) and isinstance(b, float):
+            self.assertEqual('%.14g' % a, '%.14g' % b)
+        else:
+            self.assertEqual(a, b)
 
     def testStringChoice(self):
         class X(Object):
@@ -86,25 +136,138 @@ class TestGuts(unittest.TestCase):
         with self.assertRaises(ValidationError):
             x.validate()
 
+    def testStringChoiceIgnoreCase(self):
+        class X(Object):
+            m = StringChoice.T(['a', 'b'], ignore_case=True)
+
+        x = X(m='A')
+        x.validate()
+        x = X(m='C')
+        with self.assertRaises(ValidationError):
+            x.validate()
+
+    def testDefaultMaker(self):
+        class X(Object):
+            a = Int.T(default=1)
+
+        class Y(Object):
+            x = X.T(default=X.D(a=2))
+
+        class Yb(Object):
+            x = X.T(default=X(a=2))
+
+        class Z(Object):
+            y = Y.T(default=Y.D(x=X.D(a=3)))
+
+        class Zb(Object):
+            y = Y.T(default=Yb(x=X(a=3)))
+
+        class Zl(Object):
+            y = Y.T(default=Y.D(x=X.D(a=3)))
+
+        class Zbl(Object):
+            y = Y.T(default=Yb(x=X(a=3)))
+
+        y = Y()
+        self.assertEqual(y.x.a, 2)
+
+        z = Z()
+        z2 = Z()
+
+        z2.y.x.a = 5
+        self.assertEqual(z.y.x.a, 3)
+        self.assertEqual(z2.y.x.a, 5)
+
+        y = Yb()
+        self.assertEqual(y.x.a, 2)
+
+        z = Zb()
+        z2 = Zb()
+
+        z2.y.x.a = 5
+        self.assertEqual(z.y.x.a, 3)
+        self.assertEqual(z2.y.x.a, 5)
+
+    def testDefaultList(self):
+        class X(Object):
+            a = Int.T(default=1)
+
+        class Y(Object):
+            xs = List.T(X.T(), default=[X(a=2)])
+
+        y = Y()
+        y.xs[0].a = 3
+        y2 = Y()
+        self.assertEqual(y2.xs[0].a, 2)
+        self.assertEqual(y.xs[0].a, 3)
+
+    def testDefaultTuple(self):
+        class X(Object):
+            a = Int.T(default=1)
+
+        class Y(Object):
+            xs = Tuple.T(1, X.T(), default=(X(a=2),))
+
+        y = Y()
+        y.xs[0].a = 3
+        y2 = Y()
+        self.assertEqual(y2.xs[0].a, 2)
+        self.assertEqual(y.xs[0].a, 3)
+
+    def testDefaultDict(self):
+        class X(Object):
+            a = Int.T(default=1)
+
+        class Y(Object):
+            xs = Dict.T(X.T(), X.T(), default={
+                X(a=2): X(a=3)})
+
+        def fi(d):
+            return list(d.values())[0]
+
+        y = Y()
+        fi(y.xs).a = 4
+        y2 = Y()
+        self.assertEqual(fi(y2.xs).a, 3)
+        self.assertEqual(fi(y.xs).a, 4)
+
+    def testRemove(self):
+        class X(Object):
+            y = Int.T(default=1, xmlstyle='attribute')
+            z = List.T(Int.T())
+            a = Int.T(xmlstyle='content')
+
+        x = X(a=11, z=[1, 2, 3])
+        del x
+
+        X.T.remove_property('y')
+        X.T.remove_property('z')
+        X.T.remove_property('a')
+
+        assert len(X.T.propnames) == 0
+        assert len(X.T.xmltagname_to_name) == 0
+        assert len(X.T.xmltagname_to_name_multivalued) == 0
+        assert len(X.T.xmltagname_to_name_multivalued) == 0
+
     def testAny(self):
         class X(Object):
             y = Int.T(default=1)
-            
+
         class A(Object):
             x = Any.T()
-            l = List.T(Any.T())
+            lst = List.T(Any.T())
 
         a1 = A(x=X(y=33))
         a1.validate()
         a1c = load_string(a1.dump())
         self.assertEqual(a1c.x.y, 33)
 
-        a2 = A(x=22, l=['a', 44, X(y=22)])
+        a2 = A(x=22, lst=['a', 44, X(y=22)])
         a2.validate()
         a2c = load_string(a2.dump())
         self.assertEqual(a2c.x, 22)
-        self.assertEqual(a2c.l[:2], ['a', 44])
-        self.assertEqual(a2c.l[2].y, 22)
+        self.assertEqual(a2c.lst[:2], ['a', 44])
+        self.assertEqual(a2c.lst[2].y, 22)
 
         a3 = A(x=X(y='10'))
         with self.assertRaises(ValidationError):
@@ -149,8 +312,8 @@ class TestGuts(unittest.TestCase):
             m = Union.T(members=[Int.T(), StringChoice.T(['small', 'large'])])
 
         class U(Union):
-            members = [ Int.T(), StringChoice.T(['small', 'large']) ]
-    
+            members = [Int.T(), StringChoice.T(['small', 'large'])]
+
         class X2(Object):
             xmltagname = 'root'
             m = U.T()
@@ -194,18 +357,20 @@ class TestGuts(unittest.TestCase):
             choices = [A.T(xmltagname='a'), B.T(xmltagname='b')]
 
         class C1(Object):
-            xmltagname='root1'
+            xmltagname = 'root1'
             ab = Choice.T(choices=[A.T(xmltagname='a'), B.T(xmltagname='b')])
 
         class C2(Object):
-            xmltagname='root2'
+            xmltagname = 'root2'
             ab = AB.T()
-    
+
         for C in (C1, C2):
             for good in (A(), B()):
                 c = C(ab=good)
                 c.validate()
-                for dumpx, loadx in ((dump, load_string), (dump_xml, load_xml_string)):
+                for dumpx, loadx in (
+                        (dump, load_string),
+                        (dump_xml, load_xml_string)):
                     c2 = loadx(dumpx(c))
                     self.assertEqual(type(c2), C)
                     self.assertEqual(type(c2.ab), type(good))
@@ -215,20 +380,45 @@ class TestGuts(unittest.TestCase):
                 with self.assertRaises(ValidationError):
                     c.validate()
 
+        c = C1(ab=A(x='5'))
+        c.regularize()
+        assert c.ab.x == 5
+        c = C1(ab=B(y='6'))
+        c.regularize()
+        assert c.ab.y == 6
+
+    def testRegularizeChoice(self):
+
+        class A(Object):
+            x = Choice.T(optional=True, choices=[Timestamp.T(), Int.T()])
+
+        a = A()
+        a.regularize()
+
+        a = A(x='2015-01-01 00:00:00')
+        a.regularize()
+
+        a = A(x='5')
+        a.regularize()
+
+        a = A(x='abc')
+        with self.assertRaises(ValidationError):
+            a.regularize()
+
     def testTooMany(self):
 
         class A(Object):
             m = List.T(Int.T())
             xmltagname = 'a'
 
-        a = A(m=[1,2,3])
+        a = A(m=[1, 2, 3])
 
         class A(Object):
             m = Int.T()
             xmltagname = 'a'
-        
+
         with self.assertRaises(ArgumentError):
-            a2 = load_xml_string(a.dump_xml())
+            load_xml_string(a.dump_xml())
 
     def testDeferred(self):
         class A(Object):
@@ -238,6 +428,7 @@ class TestGuts(unittest.TestCase):
             p = A.T()
 
         a = A(p=B(p=A()))
+        del a
 
     def testListDeferred(self):
         class A(Object):
@@ -247,7 +438,8 @@ class TestGuts(unittest.TestCase):
         class B(Object):
             p = List.T(A.T())
 
-        a = A(p=[B(p=[A()])], q=[B(),B()])
+        a = A(p=[B(p=[A()])], q=[B(), B()])
+        del a
 
     def testOptionalList(self):
         class A(Object):
@@ -266,6 +458,7 @@ class TestGuts(unittest.TestCase):
             a = Defer('A.T', optional=True)
 
         a = A(a=A(a=A()))
+        del a
 
     def testOrder(self):
         class A(Object):
@@ -277,7 +470,7 @@ class TestGuts(unittest.TestCase):
             c = Int.T(default=4)
 
         b = B()
-        names = [ k for (k,v) in b.T.inamevals(b) ]
+        names = [k for (k, v) in b.T.inamevals(b)]
         assert names == ['a', 'b', 'c']
 
     def testOrderDeferred(self):
@@ -285,12 +478,11 @@ class TestGuts(unittest.TestCase):
             a = Defer('B.T')
             b = Int.T(default=0)
 
-
         class B(Object):
             x = Int.T(default=1)
 
         a = A(a=B())
-        names = [ k for (k,v) in a.T.inamevals(a) ]
+        names = [k for (k, v) in a.T.inamevals(a)]
 
         assert names == ['a', 'b']
 
@@ -308,18 +500,18 @@ class TestGuts(unittest.TestCase):
 
         self.assertEqual(B.__doc__, '''B description
 
-    .. py:attribute:: b
+    .. py:gattribute:: b
 
       ``float``, *default:* ``0``
-
+      
       the b property
 
-    .. py:attribute:: c
+    .. py:gattribute:: c
 
       ``list`` of ``int`` objects, *default:* ``[]``
-
+      
       the c
-''')
+''')  # noqa
 
     def testContentStyleXML(self):
 
@@ -367,37 +559,199 @@ class TestGuts(unittest.TestCase):
         self.assertEqual(x.dn.network, 'abc')
         self.assertEqual(x.dn.station, 'def')
 
+    def testDict(self):
+        class A(Object):
+            d = Dict.T(Int.T(), Float.T())
+
+        a = A(d={1: 2.0})
+
+        with self.assertRaises(NotImplementedError):
+            a.dump_xml()
+
+        a2 = load_string(a.dump())
+        self.assertEqual(a2.dump(), a.dump())
+
+        for (k1, v1), (k2, v2) in [
+                [('1', 2.0), (1, 2.0)],
+                [(1, '2.0'), (1, 2.0)],
+                [('1', '2.0'), (1, 2.0)]]:
+
+            a = A(d={k1: v1})
+            with self.assertRaises(ValidationError):
+                a.validate()
+
+            a.regularize()
+            self.assertEqual(a.d[k2], v2)
+
+    def testOptionalDefault(self):
+
+        from guts_array import Array, array_equal
+        import numpy as num
+        assert_ae = num.testing.assert_almost_equal
+
+        def array_equal_noneaware(a, b):
+            if a is None:
+                return b is None
+            elif b is None:
+                return a is None
+            else:
+                return array_equal(a, b)
+
+        data = [
+            ('a', Int.T(),
+                [None, 0, 1, 2],
+                ['aerr', 0, 1, 2]),
+            ('b', Int.T(optional=True),
+                [None, 0, 1, 2],
+                [None, 0, 1, 2]),
+            ('c', Int.T(default=1),
+                [None, 0, 1, 2],
+                [1, 0, 1, 2]),
+            ('d', Int.T(default=1, optional=True),
+                [None, 0, 1, 2],
+                [1, 0, 1, 2]),
+            ('e', List.T(Int.T()),
+                [None, [], [1], [2]],
+                [[], [], [1], [2]]),
+            ('f', List.T(Int.T(), optional=True),
+                [None, [], [1], [2]],
+                [None, [], [1], [2]]),
+            ('g', List.T(Int.T(), default=[1]), [
+                None, [], [1], [2]],
+                [[1], [], [1], [2]]),
+            ('h', List.T(Int.T(), default=[1], optional=True),
+                [None, [], [1], [2]],
+                [[1], [], [1], [2]]),
+            ('i', Tuple.T(2, Int.T()),
+                [None, (1, 2)],
+                ['err', (1, 2)]),
+            ('j', Tuple.T(2, Int.T(), optional=True),
+                [None, (1, 2)],
+                [None, (1, 2)]),
+            ('k', Tuple.T(2, Int.T(), default=(1, 2)),
+                [None, (1, 2), (3, 4)],
+                [(1, 2), (1, 2), (3, 4)]),
+            ('l', Tuple.T(2, Int.T(), default=(1, 2), optional=True),
+                [None, (1, 2), (3, 4)],
+                [(1, 2), (1, 2), (3, 4)]),
+            ('i2', Tuple.T(None, Int.T()),
+                [None, (1, 2)],
+                [(), (1, 2)]),
+            ('j2', Tuple.T(None, Int.T(), optional=True),
+                [None, (), (3, 4)],
+                [None, (), (3, 4)]),
+            ('k2', Tuple.T(None, Int.T(), default=(1,)),
+                [None, (), (3, 4)],
+                [(1,), (), (3, 4)]),
+            ('l2', Tuple.T(None, Int.T(), default=(1,), optional=True),
+                [None, (), (3, 4)],
+                [(1,), (), (3, 4)]),
+            ('m', Array.T(shape=(None,), dtype=num.int, serialize_as='list'),
+                [num.arange(0), num.arange(2)],
+                [num.arange(0), num.arange(2)]),
+            ('n', Array.T(shape=(None,), dtype=num.int, serialize_as='list',
+                          optional=True),
+                [None, num.arange(0), num.arange(2)],
+                [None, num.arange(0), num.arange(2)]),
+            ('o', Array.T(shape=(None,), dtype=num.int, serialize_as='list',
+                          default=num.arange(2)),
+                [None, num.arange(0), num.arange(2), num.arange(3)],
+                [num.arange(2), num.arange(0), num.arange(2), num.arange(3)]),
+            ('p', Array.T(shape=(None,), dtype=num.int, serialize_as='list',
+                          default=num.arange(2), optional=True),
+                [None, num.arange(0), num.arange(2), num.arange(3)],
+                [num.arange(2), num.arange(0), num.arange(2), num.arange(3)]),
+            ('q', Dict.T(String.T(), Int.T()),
+                [None, {}, {'a': 1}],
+                [{}, {}, {'a': 1}]),
+            ('r', Dict.T(String.T(), Int.T(), optional=True),
+                [None, {}, {'a': 1}],
+                [None, {}, {'a': 1}]),
+            ('s', Dict.T(String.T(), Int.T(), default={'a': 1}),
+                [None, {}, {'a': 1}],
+                [{'a': 1}, {}, {'a': 1}]),
+            ('t', Dict.T(String.T(), Int.T(), default={'a': 1}, optional=True),
+                [None, {}, {'a': 1}],
+                [{'a': 1}, {}, {'a': 1}]),
+        ]
+
+        for k, t, vals, exp, in data:
+            last = [None]
+
+            class A(Object):
+                def __init__(self, **kwargs):
+                    last[0] = len(kwargs)
+                    Object.__init__(self, **kwargs)
+
+                v = t
+
+            A.T.class_signature()
+
+            for v, e in zip(vals, exp):
+                if isinstance(e, str) and e == 'aerr':
+                    with self.assertRaises(ArgumentError):
+                        if v is not None:
+                            a1 = A(v=v)
+                        else:
+                            a1 = A()
+
+                    continue
+                else:
+                    if v is not None:
+                        a1 = A(v=v)
+                    else:
+                        a1 = A()
+
+                if isinstance(e, str) and e == 'err':
+                    with self.assertRaises(ValidationError):
+                        a1.validate()
+                else:
+                    a1.validate()
+                    a2 = load_string(dump(a1))
+                    if isinstance(e, num.ndarray):
+                        assert last[0] == int(
+                            not (array_equal_noneaware(t.default(), a1.v)
+                                 and t.optional))
+                        assert_ae(a1.v, e)
+                        assert_ae(a1.v, e)
+                    else:
+                        assert last[0] == int(
+                            not(t.default() == a1.v and t.optional))
+                        self.assertEqual(a1.v, e)
+                        self.assertEqual(a2.v, e)
+
     def testArray(self):
         from guts_array import Array
         import numpy as num
 
-        shapes = [ (None,), (1,), (10,), (1000,) ]
+        shapes = [(None,), (1,), (10,), (1000,)]
         for shape in shapes:
-            for serialize_as in ('base64', 'table'):
+            for serialize_as in ('base64', 'table', 'npy',
+                                 'base64+meta', 'base64-compat'):
                 class A(Object):
                     xmltagname = 'aroot'
                     arr = Array.T(
                         shape=shape,
-                        dtype=num.int, 
+                        dtype=num.int,
                         serialize_as=serialize_as,
                         serialize_dtype='>i8')
 
-                n = shape[0] or 1000
-                a = A(arr=num.arange(n, dtype=num.int))        
-
+                n = shape[0] or 10
+                a = A(arr=num.arange(n, dtype=num.int))
                 b = load_string(a.dump())
                 self.assertTrue(num.all(a.arr == b.arr))
 
-                b = load_xml_string(a.dump_xml())
-                self.assertTrue(num.all(a.arr == b.arr))
+                if serialize_as != 'base64+meta':
+                    b = load_xml_string(a.dump_xml())
+                    self.assertTrue(num.all(a.arr == b.arr))
 
                 if shape[0] is not None:
                     with self.assertRaises(ValidationError):
                         a = A(arr=num.arange(n+10, dtype=num.int))
                         a.validate()
-                        
-        for s0 in [ None, 2, 10 ]:
-            for s1 in [ None, 2, 10 ]:
+
+        for s0 in [None, 2, 10]:
+            for s1 in [None, 2, 10]:
                 class A(Object):
                     xmltagname = 'aroot'
                     arr = Array.T(
@@ -406,12 +760,27 @@ class TestGuts(unittest.TestCase):
 
                 n0 = s0 or 100
                 n1 = s1 or 100
-                a = A(arr=num.arange(n0*n1, dtype=num.int).reshape((n0,n1)))
+                a = A(arr=num.arange(n0*n1, dtype=num.int).reshape((n0, n1)))
                 b = load_string(a.dump())
                 self.assertTrue(num.all(a.arr == b.arr))
 
                 b = load_xml_string(a.dump_xml())
                 self.assertTrue(num.all(a.arr == b.arr))
+
+    def testArrayNoDtype(self):
+        from guts_array import Array
+        import numpy as num
+
+        class A(Object):
+            arr = Array.T(serialize_as='base64+meta')
+
+        for dtype in (num.int, num.float):
+            a = A(arr=num.zeros((3, 3), dtype=dtype))
+            b = load_string(a.dump())
+            assert a.arr.shape == b.arr.shape
+            self.assertTrue(num.all(a.arr == b.arr))
+
+        b_int = load_string  # noqa
 
     def testPO(self):
         class SKU(StringPattern):
@@ -424,7 +793,8 @@ class TestGuts(unittest.TestCase):
             pass
 
         class USAddress(Object):
-            country = String.T(default='US', optional=True, xmlstyle='attribute')
+            country = String.T(
+                default='US', optional=True, xmlstyle='attribute')
             name = String.T()
             street = String.T()
             city = String.T()
@@ -485,91 +855,417 @@ class TestGuts(unittest.TestCase):
    </items>
 </purchaseOrder>
 '''
-        po1 = load_xml_string(xml) 
+        po1 = load_xml_string(xml)
         po2 = load_xml_string(po1.dump_xml())
-        
+
+        for (path1, obj1), (path2, obj2) in zip(walk(po1), walk(po2)):
+            assert path1 == path2
+            assert path_to_str(path1) == path_to_str(path2)
+            assert type(obj1) is type(obj2)
+            if not isinstance(obj1, Object):
+                assert obj1 == obj2
+
+        for _ in zip_walk(po1):
+            pass
+
         self.assertEqual(po1.dump(), po2.dump())
 
     def testDumpLoad(self):
 
         from tempfile import NamedTemporaryFile as NTF
-        from cStringIO import StringIO
 
         class A(Object):
             xmltagname = 'a'
             p = Int.T()
 
         a1 = A(p=33)
-        an = [ a1, a1, a1 ]
+        an = [a1, a1, a1]
 
-        def check1(a,b):
+        def check1(a, b):
             self.assertEqual(a.p, b.p)
 
-        def checkn(a,b):
-            for ea, eb in zip(a,b):
+        def checkn(a, b):
+            for ea, eb in zip(a, b):
                 self.assertEqual(ea.p, eb.p)
 
         for (a, xdump, xload, check) in [
-                    (a1, dump, load, check1), 
-                    (a1, dump_xml, load_xml, check1),
-                    (an, dump_all, load_all, checkn), 
-                    (an, dump_all, iload_all, checkn), 
-                    (an, dump_all_xml, load_all_xml, checkn),
-                    (an, dump_all_xml, iload_all_xml, checkn)
-                ]:
+                (a1, dump, load, check1),
+                (a1, dump_xml, load_xml, check1),
+                (an, dump_all, load_all, checkn),
+                (an, dump_all, iload_all, checkn),
+                (an, dump_all_xml, load_all_xml, checkn),
+                (an, dump_all_xml, iload_all_xml, checkn)]:
 
             for header in (False, True, 'custom header'):
                 # via string
                 s = xdump(a, header=header)
                 b = xload(string=s)
-                check(a,b)
+                check(a, b)
 
                 # via file
-                f = NTF()
+                f = NTF(mode='w+')
                 xdump(a, filename=f.name, header=header)
                 b = xload(filename=f.name)
-                check(a,b)
+                check(a, b)
                 f.close()
 
                 # via stream
-                f = NTF()
-                xdump(a, stream=f, header=header)
-                f.seek(0)
-                b = xload(stream=f)
-                check(a,b)
-                f.close()
+                for mode in ['w+b', 'w+']:
+                    f = NTF(mode=mode)
+                    xdump(a, stream=f, header=header)
+                    f.seek(0)
+                    b = xload(stream=f)
+                    check(a, b)
+                    f.close()
 
         b1 = A.load(string=a1.dump())
-        check1(a1,b1)
+        check1(a1, b1)
 
-        f = NTF()
+        f = NTF(mode='w+')
         a1.dump(filename=f.name)
         b1 = A.load(filename=f.name)
-        check1(a1,b1)
+        check1(a1, b1)
         f.close()
 
-        f = NTF()
+        f = NTF(mode='w+')
         a1.dump(stream=f)
         f.seek(0)
         b1 = A.load(stream=f)
-        check1(a1,b1)
+        check1(a1, b1)
         f.close()
-    
-        b1 = A.load_xml(string=a1.dump_xml())
-        check1(a1,b1)
 
-        f = NTF()
+        b1 = A.load_xml(string=a1.dump_xml())
+        check1(a1, b1)
+
+        f = NTF(mode='w+')
         a1.dump_xml(filename=f.name)
         b1 = A.load_xml(filename=f.name)
-        check1(a1,b1)
+        check1(a1, b1)
         f.close()
 
-        f = NTF()
+        f = NTF(mode='w+')
         a1.dump_xml(stream=f)
         f.seek(0)
         b1 = A.load_xml(stream=f)
-        check1(a1,b1)
+        check1(a1, b1)
         f.close()
+
+    def testCustomValidator(self):
+
+        class RangeFloat(Float):
+            class __T(Float.T):
+                def __init__(self, min=0., max=1., *args, **kwargs):
+                    Float.T.__init__(self, *args, **kwargs)
+                    self.min = min
+                    self.max = max
+
+                def validate_extra(self, val):
+                    if val < self.min or self.max < val:
+                        raise ValidationError('out of range [%g, %g]: %g' % (
+                            self.min, self.max, val))
+
+        class A(Object):
+            x = RangeFloat.T(min=-1., max=+1., default=0.)
+
+        class B(A):
+            y = RangeFloat.T(min=-2., max=+2., default=1.)
+
+            class __T(A.T):
+                def validate_extra(self, val):
+                    if val.y <= val.x:
+                        raise ValidationError('y must be greater than x')
+
+        class C(B):
+            class __T(B.T):
+                def validate_extra(self, val):
+                    if val.y >= val.x:
+                        raise ValidationError('x must be greater than y')
+
+        a1 = A()
+        a1.validate()
+
+        a2 = A(x=10.)
+        with self.assertRaises(ValidationError):
+            a2.validate()
+
+        b1 = B()
+        b1.validate()
+
+        b2 = B(x=1., y=0.)
+        with self.assertRaises(ValidationError):
+            b2.validate()
+
+        c1 = C()
+        with self.assertRaises(ValidationError):
+            c1.validate()
+
+        c2 = C(x=1., y=0.)
+        c2.validate()
+
+    def testTypedListClass(self):
+
+        FloatList = make_typed_list_class(Float)
+
+        class A(Object):
+            vals = FloatList.T()
+
+        a = A(vals=[1., 2., 3.])
+        a.validate()
+        a2 = load_string(a.dump())
+        assert a2.vals == a.vals
+
+    def testClone(self):
+
+        class A(Object):
+            a = Int.T(optional=True)
+
+        class B(Object):
+            a_list = List.T(A.T())
+            a_tuple = Tuple.T(3, A.T())
+            a_dict = Dict.T(Int.T(), A.T())
+            b = Float.T()
+
+        a1 = A()
+        a2 = A(a=1)
+        b = B(
+            a_list=[a1, a2],
+            a_tuple=(a1, a2, a2),
+            a_dict={1: a1, 2: a2},
+            b=1.0)
+        b_clone = clone(b)
+        b.validate()
+        b_clone.validate()
+        self.assertEqual(b.dump(), b_clone.dump())
+        assert b is not b_clone
+        assert b.a_list is not b_clone.a_list
+        assert b.a_tuple is not b_clone.a_tuple
+        assert b.a_list[0] is not b_clone.a_list[0]
+        assert b.a_tuple[0] is not b_clone.a_tuple[0]
+
+    def testYPath(self):
+
+        class A(Object):
+            i = Int.T()
+            i_list = List.T(Int.T())
+
+        class B(Object):
+            a_list = List.T(A.T())
+
+        class C(Object):
+            b_list = List.T(B.T())
+
+        c = C(b_list=[B(a_list=[A(i=1), A(i=2)]), B(a_list=[A(i=3), A(i=4)])])
+
+        assert get_elements(c, 'b_list[:].a_list[:].i') == [1, 2, 3, 4]
+        assert get_elements(c, 'b_list[0].a_list[:].i') == [1, 2]
+        assert get_elements(c, 'b_list[:1].a_list[:].i') == [1, 2]
+        assert get_elements(c, 'b_list[:1].a_list[1:].i') == [2]
+        assert [x.i for x in get_elements(c, 'b_list[-1].a_list[:]')] == [3, 4]
+
+        with self.assertRaises(YPathError):
+            get_elements(c, 'b_list[:].x_list[:].i')
+
+        with self.assertRaises(YPathError):
+            get_elements(c, 'b_list[:].a_list[:].x')
+
+        with self.assertRaises(YPathError):
+            get_elements(c, 'b_list[:].a_list[5]')
+
+        with self.assertRaises(YPathError):
+            get_elements(c, 'b_list[:].a_list[:].i.xxx')
+
+        with self.assertRaises(YPathError):
+            get_elements(c, '...')
+
+        set_elements(c, 'b_list[1].a_list', [A(i=5), A(i=6)])
+        assert get_elements(c, 'b_list[1].a_list[:].i') == [5, 6]
+
+        set_elements(c, 'b_list[:].a_list[:].i', 7)
+        assert get_elements(c, 'b_list[:].a_list[:].i') == [7, 7, 7, 7]
+
+        with self.assertRaises(ValidationError):
+            set_elements(c, 'b_list[:].a_list[:].i', '7', validate=True)
+
+        set_elements(c, 'b_list[:].a_list[:].i', '7', regularize=True)
+        assert get_elements(c, 'b_list[:].a_list[:].i') == [7, 7, 7, 7]
+
+        set_elements(c, 'b_list[:].a_list[:].i_list', [1, 2, 3, 4])
+        set_elements(c, 'b_list[:].a_list[:].i_list[1]', 5)
+        set_elements(c, 'b_list[:].a_list[:].i_list[:]', 5)
+        assert get_elements(c, 'b_list[:].a_list[:].i_list[:]') == [5] * 16
+
+    def testXMLNamespaces(self):
+        ns1 = 'http://www.w3.org/TR/html4/'
+        ns2 = 'https://www.w3schools.com/furniture'
+
+        class Row(Object):
+            xmlns = ns1
+            cells = List.T(String.T(xmltagname='td'))
+
+        class Table1(Object):
+            xmlns = ns1
+            rows = List.T(Row.T(xmltagname='tr'))
+
+        class Table2(Object):
+            xmlns = ns2
+            name = String.T()
+            width = Int.T()
+            length = Int.T()
+
+        class Root(Object):
+            xmltagname = 'root'
+            tables1 = List.T(Table1.T(xmltagname='table'))
+            tables2 = List.T(Table2.T(xmltagname='table'))
+
+        doc = '''
+<root xmlns:h="http://www.w3.org/TR/html4/"
+xmlns:f="https://www.w3schools.com/furniture">
+
+<h:table>
+  <h:tr>
+    <h:td>Apples</h:td>
+    <h:td>Bananas</h:td>
+  </h:tr>
+</h:table>
+
+<f:table>
+  <f:name>African Coffee Table</f:name>
+  <f:width>80</f:width>
+  <f:length>120</f:length>
+</f:table>
+
+</root>
+        '''
+
+        o = load_xml(string=doc)
+        s = o.dump_xml()
+        o2 = load_xml(string=s)
+        del o2
+
+        assert isinstance(o.tables1[0], Table1)
+        assert isinstance(o.tables2[0], Table2)
+
+    def testXMLNamespaces2(self):
+        ns1 = 'http://www.w3.org/TR/html4/'
+
+        class Row(Object):
+            xmlns = ns1
+            cells = List.T(String.T(xmltagname='td'))
+
+        class Table1(Object):
+            xmlns = ns1
+            rows = List.T(Row.T(xmltagname='tr'))
+
+        class Root(Object):
+            xmltagname = 'root'
+            tables1 = List.T(Table1.T(xmltagname='table'))
+
+        doc = '''
+<root xmlns:h="http://www.w3.org/TR/html4/">
+
+<h:table>
+  <h:tr>
+    <h:td>Apples</h:td>
+    <h:td>Bananas</h:td>
+  </h:tr>
+</h:table>
+
+</root>
+        '''
+
+        o = load_xml(string=doc)
+        assert isinstance(o.tables1[0], Table1)
+        s = o.dump_xml()
+
+        o2 = load_xml(string=s)
+        assert isinstance(o2.tables1[0], Table1)
+        s2 = o2.dump_xml(ns_ignore=True)
+
+        o3 = load_xml(string=s2, ns_hints=['', 'http://www.w3.org/TR/html4/'])
+        assert isinstance(o3.tables1[0], Table1)
+
+    def testStyles(self):
+        for cls, Class in [(str, String), (unicode, Unicode)]:
+            class A(Object):
+                s = Class.T(yamlstyle=None)
+                s_singlequoted = Class.T(yamlstyle="'")
+                s_doublequoted = Class.T(yamlstyle='"')
+                s_literal = Class.T(yamlstyle='|')
+                s_folded = Class.T(yamlstyle='>')
+                l_block = List.T(Class.T(yamlstyle="'"), yamlstyle='block')
+                l_flow = List.T(Class.T(yamlstyle="'"), yamlstyle='flow')
+
+            a = A(
+                s=cls('hello'),
+                s_singlequoted=cls('hello'),
+                s_doublequoted=cls('hello'),
+                s_literal=cls('hello\nhello\n'),
+                s_folded=cls('hello'),
+                l_block=[cls('a'), cls('b'), cls('c')],
+                l_flow=[cls('a'), cls('b'), cls('c')])
+
+            a.validate()
+
+            a2 = load_string(a.dump())
+            s2 = ('\n'.join(a2.dump().splitlines()[1:]))
+            assert type(a2.s) == cls
+
+            assert s2 == '''
+s: hello
+s_singlequoted: 'hello'
+s_doublequoted: "hello"
+s_literal: |
+  hello
+  hello
+s_folded: >-
+  hello
+l_block:
+- 'a'
+- 'b'
+- 'c'
+l_flow: ['a', 'b', 'c']
+'''.strip()
+
+    def testEmpty(self):
+
+        class A(Object):
+            pass
+
+        class B(Object):
+            a = A.T()
+
+        b = B(a=A())
+        b2 = load_string(b.dump())
+        assert(isinstance(b2.a, A))
+
+    def testNumpyFloat(self):
+
+        class A(Object):
+            f = Float.T()
+            i = Int.T()
+
+        try:
+            import numpy as num
+
+            a = A(f=num.float64(1.0), i=num.int64(1))
+            a2 = load_string(a.dump())
+            assert a2.f == 1.0
+            assert a2.i == 1
+
+            with self.assertRaises(ValidationError):
+                a.validate()
+
+            a = A(f=num.float32(1.0), i=num.int32(1))
+            a2 = load_string(a.dump())
+            assert a2.f == 1.0
+            assert a2.i == 1
+
+            with self.assertRaises(ValidationError):
+                a.validate()
+
+        except ImportError:
+            pass
+
 
 def makeBasicTypeTest(Type, sample, sample_in=None, xml=False):
 
@@ -594,7 +1290,7 @@ def makeBasicTypeTest(Type, sample, sample_in=None, xml=False):
 
         x.validate(regularize=sample_in is not sample)
         self.assertEqualNanAware(sample, x.a)
-        
+
         if not xml:
             x2 = load_string(x.dump())
 
@@ -621,20 +1317,28 @@ def makeBasicTypeTest(Type, sample, sample_in=None, xml=False):
 
     return basicTypeTest
 
+
 for Type in samples:
     for isample, sample in enumerate(samples[Type]):
         for xml in (False, True):
-            setattr(TestGuts, 'testBasicType' + Type.__name__ + 
-                    str(isample) + ['','XML'][xml], 
-                    makeBasicTypeTest(Type, sample, xml=xml))
+            name = 'testBasicType' + Type.__name__ + str(isample) \
+                + ['', 'XML'][xml]
+            func = makeBasicTypeTest(Type, sample, xml=xml)
+            func.__name__ = name
+            setattr(GutsTestCase, name, func)
+            del func
 
 for Type in regularize:
     for isample, (sample_in, sample) in enumerate(regularize[Type]):
         for xml in (False, True):
-            setattr(TestGuts, 'testBasicTypeRegularize' + Type.__name__ +
-                    str(isample) + ['','XML'][xml], 
-                    makeBasicTypeTest(Type, sample, sample_in=sample_in, xml=xml))
-                
+            name = 'testBasicTypeRegularize' + Type.__name__ + str(isample) \
+                + ['', 'XML'][xml]
+            func = makeBasicTypeTest(
+                Type, sample, sample_in=sample_in, xml=xml)
+            func.__name__ = name
+            setattr(GutsTestCase, name, func)
+            del func
+
+
 if __name__ == '__main__':
     unittest.main()
-
